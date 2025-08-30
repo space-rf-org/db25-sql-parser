@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdb25tokenizer.a CMakeFiles/db25_tokenizer.dir/src/simd_tokenizer.cpp.o
+/usr/bin/ranlib libdb25tokenizer.a

@@ -1,0 +1,30 @@
+test_tokenizer_verification 12 0.000296965
+test_parser_basic 12 0.00028516
+test_parser_select 9 0.000435884
+test_parser_correctness 10 0.0003476
+test_parser_capabilities 12 0.000278024
+test_join_parsing 12 0.000243948
+test_join_comprehensive 12 0.000259455
+test_sql_operators 9 0.000357
+test_group_by 10 0.000369763
+test_case_expr 11 0.000299943
+test_ast_verification 11 0.000334413
+test_parser_fixes 11 0.00030708
+test_subqueries 12 0.000288601
+test_cte 11 0.000304674
+test_edge_cases 12 0.000222535
+test_performance 12 0.00443236
+test_window_functions 5 0.000873067
+test_parser_fixes_phase1 6 0.000639243
+test_parser_fixes_phase2 12 0.000294781
+test_ddl_statements 11 0.000315352
+test_sql_completion 12 0.00021276
+test_ast_comprehensive 12 0.000215535
+ArenaBasicTest 12 0.000254976
+ArenaStressTest 9 0.00242759
+ArenaEdgeTest 12 0.000322062
+test_advanced_types 0 0
+test_parser_violations 2 0.0126461
+test_parser_validation 3 0.000705375
+---
+test_advanced_types

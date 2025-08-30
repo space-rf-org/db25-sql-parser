@@ -1,0 +1,678 @@
+(* 
+ * DB25 SQL Parser - Formal Grammar Specification
+ * ===============================================
+ * Version: 1.0
+ * Standard: SQL:2016 Core + Common Extensions
+ * Notation: ISO/IEC 14977 EBNF
+ *
+ * This grammar defines the exact SQL syntax accepted by DB25 parser.
+ * It serves as the authoritative specification for parser implementation.
+ *)
+
+(* ============================================================ *)
+(* 1. TOP LEVEL STRUCTURE                                      *)
+(* ============================================================ *)
+
+program = statement_list ;
+
+statement_list = [ statement { ";" statement } ] [ ";" ] ;
+
+statement = select_statement
+          | insert_statement
+          | update_statement
+          | delete_statement
+          | values_statement
+          | create_statement
+          | alter_statement
+          | drop_statement
+          | set_statement
+          | transaction_statement
+          | pragma_statement
+          | vacuum_statement
+          | analyze_statement
+          | attach_statement
+          | detach_statement
+          | reindex_statement
+          | explain_statement
+          ;
+
+(* ============================================================ *)
+(* 2. SELECT STATEMENT                                         *)
+(* ============================================================ *)
+
+select_statement = [ with_clause ]
+                  select_expression
+                  [ order_by_clause ]
+                  [ limit_clause ]
+                  ;
+
+select_expression = select_term { ( "UNION" | "INTERSECT" | "EXCEPT" ) [ "ALL" ] select_term } ;
+
+select_term = select_primary ;
+
+select_primary = "SELECT" [ set_quantifier ] select_list
+                [ from_clause ]
+                [ where_clause ]
+                [ group_by_clause ]
+                [ having_clause ]
+                [ window_clause ]
+                | "(" select_expression ")"
+                | values_clause
+                ;
+
+set_quantifier = "ALL" | "DISTINCT" ;
+
+select_list = "*" 
+            | select_item { "," select_item }
+            ;
+
+select_item = expression [ [ "AS" ] column_alias ]
+            | qualified_asterisk
+            ;
+
+qualified_asterisk = table_name "." "*" ;
+
+(* ============================================================ *)
+(* 3. WITH CLAUSE (Common Table Expressions)                   *)
+(* ============================================================ *)
+
+with_clause = "WITH" [ "RECURSIVE" ] cte_definition { "," cte_definition } ;
+
+cte_definition = cte_name [ "(" column_name { "," column_name } ")" ]
+                "AS" "(" select_statement ")"
+                [ search_clause ]
+                [ cycle_clause ]
+                ;
+
+search_clause = "SEARCH" ( "DEPTH" | "BREADTH" ) "FIRST" "BY"
+                column_name { "," column_name }
+                "SET" column_name ;
+
+cycle_clause = "CYCLE" column_name { "," column_name }
+               "SET" cycle_mark_column
+               [ "TO" cycle_mark_value "DEFAULT" non_cycle_mark_value ]
+               "USING" cycle_path_column ;
+
+(* ============================================================ *)
+(* 4. FROM CLAUSE                                              *)
+(* ============================================================ *)
+
+from_clause = "FROM" table_reference { "," table_reference } ;
+
+table_reference = table_primary [ joined_table ] ;
+
+table_primary = table_name [ [ "AS" ] table_alias ]
+              | "(" select_statement ")" [ "AS" ] table_alias
+              | table_function
+              | "(" joined_table ")"
+              ;
+
+joined_table = { join_operation table_primary [ join_condition ] } ;
+
+join_operation = [ join_type ] "JOIN"
+               | "CROSS" "JOIN"
+               | "NATURAL" [ join_type ] "JOIN"
+               ;
+
+join_type = "INNER"
+          | ( "LEFT" | "RIGHT" | "FULL" ) [ "OUTER" ]
+          ;
+
+join_condition = "ON" expression
+               | "USING" "(" column_name { "," column_name } ")"
+               ;
+
+(* ============================================================ *)
+(* 5. WHERE, GROUP BY, HAVING CLAUSES                         *)
+(* ============================================================ *)
+
+where_clause = "WHERE" expression ;
+
+group_by_clause = "GROUP" "BY" grouping_element { "," grouping_element } ;
+
+grouping_element = expression
+                 | "(" ")"
+                 | "ROLLUP" "(" expression { "," expression } ")"
+                 | "CUBE" "(" expression { "," expression } ")"
+                 | "GROUPING" "SETS" "(" grouping_set { "," grouping_set } ")"
+                 ;
+
+grouping_set = expression
+             | "(" expression { "," expression } ")"
+             | "(" ")"
+             ;
+
+having_clause = "HAVING" expression ;
+
+(* ============================================================ *)
+(* 6. WINDOW CLAUSE                                            *)
+(* ============================================================ *)
+
+window_clause = "WINDOW" window_definition { "," window_definition } ;
+
+window_definition = window_name "AS" window_specification ;
+
+window_specification = "(" [ existing_window_name ]
+                      [ partition_clause ]
+                      [ order_by_clause ]
+                      [ frame_clause ]
+                      ")" ;
+
+partition_clause = "PARTITION" "BY" expression { "," expression } ;
+
+frame_clause = frame_units frame_extent [ frame_exclusion ] ;
+
+frame_units = "ROWS" | "RANGE" | "GROUPS" ;
+
+frame_extent = frame_start
+             | "BETWEEN" frame_bound "AND" frame_bound
+             ;
+
+frame_bound = frame_start | frame_end ;
+
+frame_start = "UNBOUNDED" "PRECEDING"
+            | expression "PRECEDING"
+            | "CURRENT" "ROW"
+            | expression "FOLLOWING"
+            ;
+
+frame_end = expression "PRECEDING"
+          | "CURRENT" "ROW"
+          | expression "FOLLOWING"
+          | "UNBOUNDED" "FOLLOWING"
+          ;
+
+frame_exclusion = "EXCLUDE" ( "CURRENT" "ROW" | "GROUP" | "TIES" | "NO" "OTHERS" ) ;
+
+(* ============================================================ *)
+(* 7. ORDER BY AND LIMIT CLAUSES                              *)
+(* ============================================================ *)
+
+order_by_clause = "ORDER" "BY" order_item { "," order_item } ;
+
+order_item = expression [ "ASC" | "DESC" ] [ "NULLS" ( "FIRST" | "LAST" ) ] ;
+
+limit_clause = "LIMIT" expression [ ( "OFFSET" | "," ) expression ]
+             | "OFFSET" expression [ "ROW" | "ROWS" ]
+             | "FETCH" ( "FIRST" | "NEXT" ) expression [ "ROW" | "ROWS" ] "ONLY"
+             ;
+
+(* ============================================================ *)
+(* 8. INSERT STATEMENT                                         *)
+(* ============================================================ *)
+
+insert_statement = [ with_clause ]
+                  "INSERT" "INTO" table_name [ "(" column_name { "," column_name } ")" ]
+                  ( values_clause | select_statement | "DEFAULT" "VALUES" )
+                  [ on_conflict_clause ]
+                  [ returning_clause ]
+                  ;
+
+values_clause = "VALUES" value_list { "," value_list } ;
+
+value_list = "(" expression { "," expression } ")" ;
+
+on_conflict_clause = "ON" "CONFLICT" [ conflict_target ] conflict_action ;
+
+conflict_target = "(" column_name { "," column_name } ")"
+                | "ON" "CONSTRAINT" constraint_name
+                ;
+
+conflict_action = "DO" "NOTHING"
+                | "DO" "UPDATE" "SET" update_item { "," update_item } [ where_clause ]
+                ;
+
+(* ============================================================ *)
+(* 9. UPDATE STATEMENT                                         *)
+(* ============================================================ *)
+
+update_statement = [ with_clause ]
+                  "UPDATE" table_name [ [ "AS" ] table_alias ]
+                  "SET" update_item { "," update_item }
+                  [ from_clause ]
+                  [ where_clause ]
+                  [ returning_clause ]
+                  ;
+
+update_item = column_name "=" expression
+            | "(" column_name { "," column_name } ")" "=" "(" select_statement ")"
+            ;
+
+(* ============================================================ *)
+(* 10. DELETE STATEMENT                                        *)
+(* ============================================================ *)
+
+delete_statement = [ with_clause ]
+                  "DELETE" "FROM" table_name [ [ "AS" ] table_alias ]
+                  [ "USING" table_reference { "," table_reference } ]
+                  [ where_clause ]
+                  [ returning_clause ]
+                  ;
+
+returning_clause = "RETURNING" ( "*" | output_expression { "," output_expression } ) ;
+
+output_expression = expression [ [ "AS" ] column_alias ] ;
+
+(* ============================================================ *)
+(* 11. VALUES STATEMENT                                        *)
+(* ============================================================ *)
+
+values_statement = values_clause [ order_by_clause ] [ limit_clause ] ;
+
+(* ============================================================ *)
+(* 12. CREATE STATEMENTS (DDL)                                *)
+(* ============================================================ *)
+
+create_statement = create_table_statement
+                 | create_virtual_table_statement
+                 | create_index_statement
+                 | create_view_statement
+                 | create_trigger_statement
+                 | create_schema_statement
+                 | create_sequence_statement
+                 ;
+
+create_table_statement = "CREATE" [ "TEMPORARY" | "TEMP" ] "TABLE" 
+                        [ "IF" "NOT" "EXISTS" ] 
+                        table_name 
+                        ( "(" table_element { "," table_element } ")"
+                        | "AS" select_statement [ "WITH" [ "NO" ] "DATA" ] )
+                        [ table_options ]
+                        ;
+
+create_virtual_table_statement = "CREATE" "VIRTUAL" "TABLE" [ "IF" "NOT" "EXISTS" ]
+                                 table_name "USING" module_name
+                                 [ "(" module_argument { "," module_argument } ")" ]
+                                 ;
+
+table_element = column_definition
+              | table_constraint
+              ;
+
+column_definition = column_name data_type 
+                   { column_constraint }
+                   ;
+
+column_constraint = [ "CONSTRAINT" constraint_name ]
+                   ( "NOT" "NULL"
+                   | "NULL"
+                   | "UNIQUE"
+                   | "PRIMARY" "KEY"
+                   | "DEFAULT" expression
+                   | "GENERATED" "ALWAYS" "AS" "(" expression ")" [ "STORED" | "VIRTUAL" ]
+                   | "CHECK" "(" expression ")"
+                   | "REFERENCES" table_name [ "(" column_name ")" ]
+                     [ "ON" "DELETE" referential_action ]
+                     [ "ON" "UPDATE" referential_action ]
+                   | "COLLATE" collation_name
+                   )
+                   ;
+
+table_constraint = [ "CONSTRAINT" constraint_name ]
+                  ( "PRIMARY" "KEY" "(" column_name { "," column_name } ")"
+                  | "UNIQUE" "(" column_name { "," column_name } ")"
+                  | "CHECK" "(" expression ")"
+                  | "FOREIGN" "KEY" "(" column_name { "," column_name } ")"
+                    "REFERENCES" table_name [ "(" column_name { "," column_name } ")" ]
+                    [ "ON" "DELETE" referential_action ]
+                    [ "ON" "UPDATE" referential_action ]
+                  )
+                  ;
+
+referential_action = "CASCADE" | "SET" "NULL" | "SET" "DEFAULT" | "RESTRICT" | "NO" "ACTION" ;
+
+create_index_statement = "CREATE" [ "UNIQUE" ] "INDEX" 
+                        [ "IF" "NOT" "EXISTS" ]
+                        index_name
+                        "ON" table_name 
+                        [ "USING" index_method ]
+                        "(" index_element { "," index_element } ")"
+                        [ "WHERE" expression ]
+                        ;
+
+index_element = column_name [ "ASC" | "DESC" ] [ "NULLS" ( "FIRST" | "LAST" ) ] ;
+
+index_method = "BTREE" | "HASH" | "GIST" | "SPGIST" | "GIN" | "BRIN" ;
+
+create_view_statement = "CREATE" [ "OR" "REPLACE" ] [ "TEMPORARY" | "TEMP" ] "VIEW"
+                       view_name [ "(" column_name { "," column_name } ")" ]
+                       "AS" select_statement
+                       [ "WITH" [ "CASCADED" | "LOCAL" ] "CHECK" "OPTION" ]
+                       ;
+
+create_trigger_statement = "CREATE" [ "TEMPORARY" | "TEMP" ] "TRIGGER" [ "IF" "NOT" "EXISTS" ]
+                          trigger_name
+                          ( "BEFORE" | "AFTER" | "INSTEAD" "OF" )
+                          trigger_event "ON" table_name
+                          [ "FOR" "EACH" ( "ROW" | "STATEMENT" ) ]
+                          [ "WHEN" "(" expression ")" ]
+                          trigger_body
+                          ;
+
+trigger_event = "INSERT"
+              | "UPDATE" [ "OF" column_name { "," column_name } ]
+              | "DELETE"
+              ;
+
+trigger_body = "BEGIN" statement_list "END" 
+             | statement
+             ;
+
+create_schema_statement = "CREATE" "SCHEMA" [ "IF" "NOT" "EXISTS" ] schema_name
+                         [ "AUTHORIZATION" user_name ]
+                         ;
+
+create_sequence_statement = "CREATE" [ "TEMPORARY" | "TEMP" ] "SEQUENCE" [ "IF" "NOT" "EXISTS" ]
+                           sequence_name
+                           [ "INCREMENT" [ "BY" ] integer ]
+                           [ "MINVALUE" integer | "NO" "MINVALUE" ]
+                           [ "MAXVALUE" integer | "NO" "MAXVALUE" ]
+                           [ "START" [ "WITH" ] integer ]
+                           [ "CACHE" integer ]
+                           [ "CYCLE" | "NO" "CYCLE" ]
+                           ;
+
+(* ============================================================ *)
+(* 13. ALTER STATEMENTS (DDL)                                 *)
+(* ============================================================ *)
+
+alter_statement = alter_table_statement
+                | alter_index_statement
+                | alter_view_statement
+                | alter_schema_statement
+                | alter_sequence_statement
+                ;
+
+alter_table_statement = "ALTER" "TABLE" [ "IF" "EXISTS" ] table_name
+                       alter_table_action
+                       ;
+
+alter_table_action = "ADD" [ "COLUMN" ] column_definition
+                   | "DROP" [ "COLUMN" ] [ "IF" "EXISTS" ] column_name [ "CASCADE" | "RESTRICT" ]
+                   | "ALTER" [ "COLUMN" ] column_name alter_column_action
+                   | "RENAME" [ "COLUMN" ] column_name "TO" column_name
+                   | "RENAME" "TO" table_name
+                   | "ADD" table_constraint
+                   | "DROP" "CONSTRAINT" [ "IF" "EXISTS" ] constraint_name [ "CASCADE" | "RESTRICT" ]
+                   | "RENAME" "CONSTRAINT" constraint_name "TO" constraint_name
+                   ;
+
+alter_column_action = "SET" "DATA" "TYPE" data_type [ "USING" expression ]
+                    | "SET" "DEFAULT" expression
+                    | "DROP" "DEFAULT"
+                    | "SET" "NOT" "NULL"
+                    | "DROP" "NOT" "NULL"
+                    ;
+
+alter_index_statement = "ALTER" "INDEX" [ "IF" "EXISTS" ] index_name
+                       "RENAME" "TO" index_name
+                       ;
+
+alter_view_statement = "ALTER" "VIEW" [ "IF" "EXISTS" ] view_name
+                      "RENAME" "TO" view_name
+                      ;
+
+alter_schema_statement = "ALTER" "SCHEMA" schema_name
+                        ( "RENAME" "TO" schema_name
+                        | "OWNER" "TO" user_name )
+                        ;
+
+alter_sequence_statement = "ALTER" "SEQUENCE" [ "IF" "EXISTS" ] sequence_name
+                          [ "INCREMENT" [ "BY" ] integer ]
+                          [ "MINVALUE" integer | "NO" "MINVALUE" ]
+                          [ "MAXVALUE" integer | "NO" "MAXVALUE" ]
+                          [ "RESTART" [ "WITH" ] integer ]
+                          [ "CACHE" integer ]
+                          [ "CYCLE" | "NO" "CYCLE" ]
+                          ;
+
+(* ============================================================ *)
+(* 14. DROP STATEMENTS (DDL)                                  *)
+(* ============================================================ *)
+
+drop_statement = "DROP" object_type [ "IF" "EXISTS" ] 
+                object_name { "," object_name }
+                [ "CASCADE" | "RESTRICT" ]
+                ;
+
+object_type = "TABLE" | "INDEX" | "VIEW" | "TRIGGER" | "SCHEMA" | "SEQUENCE" | "DATABASE" ;
+
+(* ============================================================ *)
+(* 15. TRANSACTION STATEMENTS                                 *)
+(* ============================================================ *)
+
+transaction_statement = "BEGIN" [ "TRANSACTION" | "WORK" ] [ transaction_mode ]
+                      | "COMMIT" [ "TRANSACTION" | "WORK" ] [ "AND" [ "NO" ] "CHAIN" ]
+                      | "ROLLBACK" [ "TRANSACTION" | "WORK" ] [ "TO" [ "SAVEPOINT" ] savepoint_name ]
+                      | "SAVEPOINT" savepoint_name
+                      | "RELEASE" [ "SAVEPOINT" ] savepoint_name
+                      ;
+
+transaction_mode = "ISOLATION" "LEVEL" isolation_level
+                 | "READ" ( "WRITE" | "ONLY" )
+                 | "DEFERRABLE" | "NOT" "DEFERRABLE"
+                 ;
+
+isolation_level = "READ" "UNCOMMITTED" 
+                | "READ" "COMMITTED"
+                | "REPEATABLE" "READ"
+                | "SERIALIZABLE"
+                ;
+
+(* ============================================================ *)
+(* 16. SET STATEMENTS                                         *)
+(* ============================================================ *)
+
+set_statement = "SET" [ "SESSION" | "LOCAL" ] 
+               ( configuration_parameter ( "TO" | "=" ) setting_value
+               | "TIME" "ZONE" timezone_value )
+               ;
+
+(* ============================================================ *)
+(* 17. SQLITE-SPECIFIC STATEMENTS                             *)
+(* ============================================================ *)
+
+pragma_statement = "PRAGMA" [ schema_name "." ] pragma_name 
+                  [ "=" pragma_value | "(" pragma_value ")" ]
+                  ;
+
+vacuum_statement = "VACUUM" [ schema_name | "INTO" string_literal ] ;
+
+analyze_statement = "ANALYZE" [ schema_name | table_or_index_name | schema_name "." table_or_index_name ] ;
+
+attach_statement = "ATTACH" [ "DATABASE" ] expression "AS" schema_name ;
+
+detach_statement = "DETACH" [ "DATABASE" ] schema_name ;
+
+reindex_statement = "REINDEX" [ collation_name | table_or_index_name | schema_name "." table_or_index_name ] ;
+
+explain_statement = "EXPLAIN" [ "QUERY" "PLAN" ] statement ;
+
+(* ============================================================ *)
+(* 18. EXPRESSIONS                                            *)
+(* ============================================================ *)
+
+expression = or_expression ;
+
+or_expression = and_expression { "OR" and_expression } ;
+
+and_expression = not_expression { "AND" not_expression } ;
+
+not_expression = [ "NOT" ] comparison_expression ;
+
+comparison_expression = bitwise_or_expression
+                      { ( "=" | "<>" | "!=" | "<" | ">" | "<=" | ">=" ) bitwise_or_expression
+                      | "IS" [ "NOT" ] null_predicate
+                      | [ "NOT" ] "BETWEEN" bitwise_or_expression "AND" bitwise_or_expression
+                      | [ "NOT" ] "IN" in_predicate
+                      | [ "NOT" ] "LIKE" pattern [ "ESCAPE" escape_character ]
+                      | [ "NOT" ] "ILIKE" pattern [ "ESCAPE" escape_character ]
+                      | [ "NOT" ] "EXISTS" "(" select_statement ")"
+                      } ;
+
+null_predicate = "NULL" | "TRUE" | "FALSE" | "UNKNOWN" ;
+
+in_predicate = "(" select_statement ")"
+             | "(" expression { "," expression } ")"
+             ;
+
+bitwise_or_expression = bitwise_xor_expression { "|" bitwise_xor_expression } ;
+
+bitwise_xor_expression = bitwise_and_expression { "^" bitwise_and_expression } ;
+
+bitwise_and_expression = shift_expression { "&" shift_expression } ;
+
+shift_expression = additive_expression { ( "<<" | ">>" ) additive_expression } ;
+
+additive_expression = multiplicative_expression { ( "+" | "-" | "||" ) multiplicative_expression } ;
+
+multiplicative_expression = unary_expression { ( "*" | "/" | "%" ) unary_expression } ;
+
+unary_expression = [ "+" | "-" | "~" | "NOT" ] postfix_expression ;
+
+postfix_expression = primary_expression
+                   { "." identifier
+                   | "[" expression "]"
+                   | "(" [ expression { "," expression } ] ")"
+                   | "::" data_type
+                   } ;
+
+primary_expression = literal
+                   | column_reference
+                   | parameter
+                   | "(" expression ")"
+                   | "(" select_statement ")"
+                   | case_expression
+                   | cast_expression
+                   | function_call
+                   | array_constructor
+                   | row_constructor
+                   ;
+
+(* ============================================================ *)
+(* 19. LITERALS AND IDENTIFIERS                               *)
+(* ============================================================ *)
+
+literal = numeric_literal
+        | string_literal
+        | boolean_literal
+        | null_literal
+        | date_time_literal
+        ;
+
+numeric_literal = integer | decimal | float ;
+
+integer = digit { digit } ;
+
+decimal = digit { digit } "." digit { digit } ;
+
+float = decimal ( "E" | "e" ) [ "+" | "-" ] digit { digit } ;
+
+string_literal = "'" { character } "'" ;
+
+boolean_literal = "TRUE" | "FALSE" ;
+
+null_literal = "NULL" ;
+
+date_time_literal = "DATE" string_literal
+                  | "TIME" string_literal
+                  | "TIMESTAMP" string_literal
+                  | "INTERVAL" string_literal
+                  ;
+
+identifier = unquoted_identifier | quoted_identifier ;
+
+unquoted_identifier = letter { letter | digit | "_" } ;
+
+quoted_identifier = '"' { character } '"' ;
+
+column_reference = [ [ schema_name "." ] table_name "." ] column_name ;
+
+parameter = "?" | "$" integer | ":" identifier ;
+
+(* ============================================================ *)
+(* 20. FUNCTIONS AND SPECIAL CONSTRUCTS                       *)
+(* ============================================================ *)
+
+function_call = function_name "(" [ "DISTINCT" ] [ function_arguments ] ")"
+              [ "OVER" window_specification ]
+              [ "FILTER" "(" "WHERE" expression ")" ]
+              ;
+
+function_arguments = "*"
+                   | expression { "," expression }
+                   | expression "ORDER" "BY" order_item { "," order_item }
+                   ;
+
+case_expression = "CASE" [ expression ]
+                 { "WHEN" expression "THEN" expression }
+                 [ "ELSE" expression ]
+                 "END" ;
+
+cast_expression = "CAST" "(" expression "AS" data_type ")" ;
+
+array_constructor = "ARRAY" "[" [ expression { "," expression } ] "]"
+                  | "ARRAY" "(" select_statement ")"
+                  ;
+
+row_constructor = "ROW" "(" expression { "," expression } ")" ;
+
+(* ============================================================ *)
+(* 21. DATA TYPES                                             *)
+(* ============================================================ *)
+
+data_type = predefined_type
+          | array_type
+          | user_defined_type
+          ;
+
+predefined_type = numeric_type
+                | character_type
+                | datetime_type
+                | boolean_type
+                | binary_type
+                | json_type
+                ;
+
+numeric_type = "INTEGER" | "INT" | "SMALLINT" | "BIGINT"
+             | "DECIMAL" [ "(" precision [ "," scale ] ")" ]
+             | "NUMERIC" [ "(" precision [ "," scale ] ")" ]
+             | "REAL" | "FLOAT" [ "(" precision ")" ]
+             | "DOUBLE" "PRECISION"
+             ;
+
+character_type = ( "CHARACTER" | "CHAR" ) [ "(" length ")" ]
+               | ( "CHARACTER" "VARYING" | "VARCHAR" ) [ "(" length ")" ]
+               | "TEXT"
+               ;
+
+datetime_type = "DATE"
+              | "TIME" [ "(" precision ")" ] [ time_zone ]
+              | "TIMESTAMP" [ "(" precision ")" ] [ time_zone ]
+              | "INTERVAL" interval_fields [ "(" precision ")" ]
+              ;
+
+boolean_type = "BOOLEAN" | "BOOL" ;
+
+binary_type = "BYTEA" | "BLOB" | "BINARY" [ "(" length ")" ] ;
+
+json_type = "JSON" | "JSONB" ;
+
+array_type = data_type "[" [ integer ] "]" ;
+
+(* ============================================================ *)
+(* 22. TERMINALS                                               *)
+(* ============================================================ *)
+
+letter = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" 
+       | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" 
+       | "U" | "V" | "W" | "X" | "Y" | "Z"
+       | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j"
+       | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t"
+       | "u" | "v" | "w" | "x" | "y" | "z" ;
+
+digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+
+character = ? any printable character ? ;
+
+(* End of DB25 SQL Grammar *)

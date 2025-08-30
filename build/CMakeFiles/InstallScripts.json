@@ -1,0 +1,12 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/chiradip/codes/DB25-parser2/build/cmake_install.cmake",
+		"/Users/chiradip/codes/DB25-parser2/build/_deps/db25_tokenizer-build/cmake_install.cmake",
+		"/Users/chiradip/codes/DB25-parser2/build/_deps/googletest-build/cmake_install.cmake",
+		"/Users/chiradip/codes/DB25-parser2/build/_deps/googletest-build/googlemock/cmake_install.cmake",
+		"/Users/chiradip/codes/DB25-parser2/build/_deps/googletest-build/googletest/cmake_install.cmake",
+		"/Users/chiradip/codes/DB25-parser2/build/tests/arena/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

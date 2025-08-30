@@ -1,0 +1,1322 @@
+Start testing: Aug 30 11:12 PDT
+----------------------------------------------------------
+1/25 Testing: test_tokenizer_verification
+1/25 Test: test_tokenizer_verification
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_tokenizer_verification"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_tokenizer_verification" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+==================================
+Tokenizer Verification Test
+==================================
+
+=== Simple SELECT ===
+SQL: SELECT * FROM users
+Expected: 4 tokens
+Actual:   4 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:     OPERATOR '*'
+  Actual:       OPERATOR '*' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:      KEYWORD 'FROM'
+  Actual:        KEYWORD 'FROM' ✓
+    Keyword ID: 37
+    Position: 1:10
+
+Token [3]:
+  Expected:   IDENTIFIER 'users'
+  Actual:     IDENTIFIER 'users' ✓
+    Position: 1:15
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== SELECT with WHERE ===
+SQL: SELECT id, name FROM users WHERE age > 25
+Expected: 10 tokens
+Actual:   10 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:   IDENTIFIER 'id'
+  Actual:     IDENTIFIER 'id' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:    DELIMITER ','
+  Actual:      DELIMITER ',' ✓
+    Position: 1:10
+
+Token [3]:
+  Expected:   IDENTIFIER 'name'
+  Actual:     IDENTIFIER 'name' ✓
+    Position: 1:12
+
+Token [4]:
+  Expected:      KEYWORD 'FROM'
+  Actual:        KEYWORD 'FROM' ✓
+    Keyword ID: 37
+    Position: 1:17
+
+Token [5]:
+  Expected:   IDENTIFIER 'users'
+  Actual:     IDENTIFIER 'users' ✓
+    Position: 1:22
+
+Token [6]:
+  Expected:      KEYWORD 'WHERE'
+  Actual:        KEYWORD 'WHERE' ✓
+    Keyword ID: 104
+    Position: 1:28
+
+Token [7]:
+  Expected:   IDENTIFIER 'age'
+  Actual:     IDENTIFIER 'age' ✓
+    Position: 1:34
+
+Token [8]:
+  Expected:     OPERATOR '>'
+  Actual:       OPERATOR '>' ✓
+    Position: 1:38
+
+Token [9]:
+  Expected:       NUMBER '25'
+  Actual:         NUMBER '25' ✓
+    Position: 1:40
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== String Literals ===
+SQL: SELECT * FROM users WHERE name = 'John Doe'
+Expected: 8 tokens
+Actual:   8 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:     OPERATOR '*'
+  Actual:       OPERATOR '*' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:      KEYWORD 'FROM'
+  Actual:        KEYWORD 'FROM' ✓
+    Keyword ID: 37
+    Position: 1:10
+
+Token [3]:
+  Expected:   IDENTIFIER 'users'
+  Actual:     IDENTIFIER 'users' ✓
+    Position: 1:15
+
+Token [4]:
+  Expected:      KEYWORD 'WHERE'
+  Actual:        KEYWORD 'WHERE' ✓
+    Keyword ID: 104
+    Position: 1:21
+
+Token [5]:
+  Expected:   IDENTIFIER 'name'
+  Actual:     IDENTIFIER 'name' ✓
+    Position: 1:27
+
+Token [6]:
+  Expected:     OPERATOR '='
+  Actual:       OPERATOR '=' ✓
+    Position: 1:32
+
+Token [7]:
+  Expected:       STRING ''John Doe''
+  Actual:         STRING ''John Doe'' ✓
+    Position: 1:34
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== Numbers ===
+SQL: SELECT * WHERE price BETWEEN 10.50 AND 99
+Expected: 8 tokens
+Actual:   8 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:     OPERATOR '*'
+  Actual:       OPERATOR '*' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:      KEYWORD 'WHERE'
+  Actual:        KEYWORD 'WHERE' ✓
+    Keyword ID: 104
+    Position: 1:10
+
+Token [3]:
+  Expected:   IDENTIFIER 'price'
+  Actual:     IDENTIFIER 'price' ✓
+    Position: 1:16
+
+Token [4]:
+  Expected:      KEYWORD 'BETWEEN'
+  Actual:        KEYWORD 'BETWEEN' ✓
+    Keyword ID: 143
+    Position: 1:22
+
+Token [5]:
+  Expected:       NUMBER '10.50'
+  Actual:         NUMBER '10.50' ✓
+    Position: 1:30
+
+Token [6]:
+  Expected:      KEYWORD 'AND'
+  Actual:        KEYWORD 'AND' ✓
+    Keyword ID: 14
+    Position: 1:36
+
+Token [7]:
+  Expected:       NUMBER '99'
+  Actual:         NUMBER '99' ✓
+    Position: 1:40
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== Operators ===
+SQL: SELECT a + b * c - d / e
+Expected: 10 tokens
+Actual:   10 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:   IDENTIFIER 'a'
+  Actual:     IDENTIFIER 'a' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:     OPERATOR '+'
+  Actual:       OPERATOR '+' ✓
+    Position: 1:10
+
+Token [3]:
+  Expected:   IDENTIFIER 'b'
+  Actual:     IDENTIFIER 'b' ✓
+    Position: 1:12
+
+Token [4]:
+  Expected:     OPERATOR '*'
+  Actual:       OPERATOR '*' ✓
+    Position: 1:14
+
+Token [5]:
+  Expected:   IDENTIFIER 'c'
+  Actual:     IDENTIFIER 'c' ✓
+    Position: 1:16
+
+Token [6]:
+  Expected:     OPERATOR '-'
+  Actual:       OPERATOR '-' ✓
+    Position: 1:18
+
+Token [7]:
+  Expected:   IDENTIFIER 'd'
+  Actual:     IDENTIFIER 'd' ✓
+    Position: 1:20
+
+Token [8]:
+  Expected:     OPERATOR '/'
+  Actual:       OPERATOR '/' ✓
+    Position: 1:22
+
+Token [9]:
+  Expected:   IDENTIFIER 'e'
+  Actual:     IDENTIFIER 'e' ✓
+    Position: 1:24
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== Parentheses and Semicolon ===
+SQL: SELECT COUNT(*) FROM (SELECT * FROM t);
+Expected: 13 tokens
+Actual:   13 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:   IDENTIFIER 'COUNT'
+  Actual:     IDENTIFIER 'COUNT' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:    DELIMITER '('
+  Actual:      DELIMITER '(' ✓
+    Position: 1:13
+
+Token [3]:
+  Expected:     OPERATOR '*'
+  Actual:       OPERATOR '*' ✓
+    Position: 1:14
+
+Token [4]:
+  Expected:    DELIMITER ')'
+  Actual:      DELIMITER ')' ✓
+    Position: 1:15
+
+Token [5]:
+  Expected:      KEYWORD 'FROM'
+  Actual:        KEYWORD 'FROM' ✓
+    Keyword ID: 37
+    Position: 1:17
+
+Token [6]:
+  Expected:    DELIMITER '('
+  Actual:      DELIMITER '(' ✓
+    Position: 1:22
+
+Token [7]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:23
+
+Token [8]:
+  Expected:     OPERATOR '*'
+  Actual:       OPERATOR '*' ✓
+    Position: 1:30
+
+Token [9]:
+  Expected:      KEYWORD 'FROM'
+  Actual:        KEYWORD 'FROM' ✓
+    Keyword ID: 37
+    Position: 1:32
+
+Token [10]:
+  Expected:   IDENTIFIER 't'
+  Actual:     IDENTIFIER 't' ✓
+    Position: 1:37
+
+Token [11]:
+  Expected:    DELIMITER ')'
+  Actual:      DELIMITER ')' ✓
+    Position: 1:38
+
+Token [12]:
+  Expected:    DELIMITER ';'
+  Actual:      DELIMITER ';' ✓
+    Position: 1:39
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== Qualified Identifiers ===
+SQL: SELECT users.id, users.name FROM users
+Expected: 10 tokens
+Actual:   10 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:   IDENTIFIER 'users'
+  Actual:     IDENTIFIER 'users' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:     OPERATOR '.'
+  Actual:       OPERATOR '.' ✓
+    Position: 1:13
+
+Token [3]:
+  Expected:   IDENTIFIER 'id'
+  Actual:     IDENTIFIER 'id' ✓
+    Position: 1:14
+
+Token [4]:
+  Expected:    DELIMITER ','
+  Actual:      DELIMITER ',' ✓
+    Position: 1:16
+
+Token [5]:
+  Expected:   IDENTIFIER 'users'
+  Actual:     IDENTIFIER 'users' ✓
+    Position: 1:18
+
+Token [6]:
+  Expected:     OPERATOR '.'
+  Actual:       OPERATOR '.' ✓
+    Position: 1:23
+
+Token [7]:
+  Expected:   IDENTIFIER 'name'
+  Actual:     IDENTIFIER 'name' ✓
+    Position: 1:24
+
+Token [8]:
+  Expected:      KEYWORD 'FROM'
+  Actual:        KEYWORD 'FROM' ✓
+    Keyword ID: 37
+    Position: 1:29
+
+Token [9]:
+  Expected:   IDENTIFIER 'users'
+  Actual:     IDENTIFIER 'users' ✓
+    Position: 1:34
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== Comment Filtering Test ===
+✅ PASS: Comments and whitespace properly filtered
+
+=== Complex Operators ===
+SQL: SELECT * WHERE a >= 10 AND b <= 20 AND c <> 5
+Expected: 14 tokens
+Actual:   14 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:     OPERATOR '*'
+  Actual:       OPERATOR '*' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:      KEYWORD 'WHERE'
+  Actual:        KEYWORD 'WHERE' ✓
+    Keyword ID: 104
+    Position: 1:10
+
+Token [3]:
+  Expected:   IDENTIFIER 'a'
+  Actual:     IDENTIFIER 'a' ✓
+    Position: 1:16
+
+Token [4]:
+  Expected:     OPERATOR '>='
+  Actual:       OPERATOR '>=' ✓
+    Position: 1:18
+
+Token [5]:
+  Expected:       NUMBER '10'
+  Actual:         NUMBER '10' ✓
+    Position: 1:21
+
+Token [6]:
+  Expected:      KEYWORD 'AND'
+  Actual:        KEYWORD 'AND' ✓
+    Keyword ID: 14
+    Position: 1:24
+
+Token [7]:
+  Expected:   IDENTIFIER 'b'
+  Actual:     IDENTIFIER 'b' ✓
+    Position: 1:28
+
+Token [8]:
+  Expected:     OPERATOR '<='
+  Actual:       OPERATOR '<=' ✓
+    Position: 1:30
+
+Token [9]:
+  Expected:       NUMBER '20'
+  Actual:         NUMBER '20' ✓
+    Position: 1:33
+
+Token [10]:
+  Expected:      KEYWORD 'AND'
+  Actual:        KEYWORD 'AND' ✓
+    Keyword ID: 14
+    Position: 1:36
+
+Token [11]:
+  Expected:   IDENTIFIER 'c'
+  Actual:     IDENTIFIER 'c' ✓
+    Position: 1:40
+
+Token [12]:
+  Expected:     OPERATOR '<>'
+  Actual:       OPERATOR '<>' ✓
+    Position: 1:42
+
+Token [13]:
+  Expected:       NUMBER '5'
+  Actual:         NUMBER '5' ✓
+    Position: 1:45
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+=== Keywords vs Identifiers ===
+SQL: SELECT select_col FROM from_table WHERE where_col = 1
+Expected: 8 tokens
+Actual:   8 tokens
+
+Token [0]:
+  Expected:      KEYWORD 'SELECT'
+  Actual:        KEYWORD 'SELECT' ✓
+    Keyword ID: 133
+    Position: 1:1
+
+Token [1]:
+  Expected:   IDENTIFIER 'select_col'
+  Actual:     IDENTIFIER 'select_col' ✓
+    Position: 1:8
+
+Token [2]:
+  Expected:      KEYWORD 'FROM'
+  Actual:        KEYWORD 'FROM' ✓
+    Keyword ID: 37
+    Position: 1:19
+
+Token [3]:
+  Expected:   IDENTIFIER 'from_table'
+  Actual:     IDENTIFIER 'from_table' ✓
+    Position: 1:24
+
+Token [4]:
+  Expected:      KEYWORD 'WHERE'
+  Actual:        KEYWORD 'WHERE' ✓
+    Keyword ID: 104
+    Position: 1:35
+
+Token [5]:
+  Expected:   IDENTIFIER 'where_col'
+  Actual:     IDENTIFIER 'where_col' ✓
+    Position: 1:41
+
+Token [6]:
+  Expected:     OPERATOR '='
+  Actual:       OPERATOR '=' ✓
+    Position: 1:51
+
+Token [7]:
+  Expected:       NUMBER '1'
+  Actual:         NUMBER '1' ✓
+    Position: 1:53
+
+✓ EOF token present
+
+✅ PASS: All tokens match!
+
+==================================
+SQL Test Suite Verification
+==================================
+Found sql_test.sqls at: ../tests/sql_test.sqls
+
+[1] Testing: simple_select_2
+SQL: SELECT id, name, email FROM customers;
+  ✓ Tokens: 9 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:id] [DEL:,] [ID:name] [DEL:,] ...
+
+[2] Testing: simple_where_1
+SQL: SELECT * FROM products WHERE price > 100;
+  ✓ Tokens: 9 (clean, EOF present)
+  First tokens: [KW:SELECT] [OP:*] [KW:FROM] [ID:products] [KW:WHERE] ...
+
+[3] Testing: simple_where_2
+SQL: SELECT name, age FROM employees 
+WHERE department = 'Enginee...
+  ✓ Tokens: 15 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:name] [DEL:,] [ID:age] [KW:FROM] ...
+
+[4] Testing: simple_join_1
+SQL: SELECT u.name, o.order_date 
+FROM users u 
+INNER JOIN orders...
+  ✓ Tokens: 24 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:u] [OP:.] [ID:name] [DEL:,] ...
+
+[5] Testing: simple_aggregate_1
+SQL: SELECT department, COUNT(*) as employee_count 
+FROM employee...
+  ✓ Tokens: 15 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:department] [DEL:,] [ID:COUNT] [DEL:(] ...
+
+[6] Testing: simple_insert_1
+SQL: INSERT INTO products (name, price, category) 
+VALUES ('Lapto...
+  ✓ Tokens: 19 (clean, EOF present)
+  First tokens: [KW:INSERT] [KW:INTO] [ID:products] [DEL:(] [ID:name] ...
+
+[7] Testing: simple_update_1
+SQL: UPDATE users 
+SET last_login = CURRENT_TIMESTAMP 
+WHERE id =...
+  ✓ Tokens: 11 (clean, EOF present)
+  First tokens: [KW:UPDATE] [ID:users] [KW:SET] [ID:last_login] [OP:=] ...
+
+[8] Testing: simple_delete_1
+SQL: DELETE FROM sessions 
+WHERE created_at < '2024-01-01';
+  ✓ Tokens: 8 (clean, EOF present)
+  First tokens: [KW:DELETE] [KW:FROM] [ID:sessions] [KW:WHERE] [ID:created_at] ...
+
+[9] Testing: moderate_subquery_1
+SQL: SELECT * FROM employees 
+WHERE salary > (SELECT AVG(salary) ...
+  ✓ Tokens: 17 (clean, EOF present)
+  First tokens: [KW:SELECT] [OP:*] [KW:FROM] [ID:employees] [KW:WHERE] ...
+
+[10] Testing: moderate_join_2
+SQL: SELECT 
+    c.name AS customer_name,
+    p.name AS product_n...
+  ✓ Tokens: 66 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:c] [OP:.] [ID:name] [KW:AS] ...
+
+[11] Testing: moderate_case_1
+SQL: SELECT 
+    name,
+    salary,
+    CASE 
+        WHEN salary ...
+  ✓ Tokens: 34 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:name] [DEL:,] [ID:salary] [DEL:,] ...
+
+[12] Testing: moderate_having_1
+SQL: SELECT 
+    department,
+    AVG(salary) as avg_salary,
+    C...
+  ✓ Tokens: 40 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:department] [DEL:,] [ID:AVG] [DEL:(] ...
+
+[13] Testing: moderate_union_1
+SQL: SELECT name, email, 'customer' as type FROM customers
+UNION ...
+  ✓ Tokens: 38 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:name] [DEL:,] [ID:email] [DEL:,] ...
+
+[14] Testing: complex_cte_1
+SQL: WITH regional_sales AS (
+    SELECT 
+        region,
+       ...
+  ✓ Tokens: 86 (clean, EOF present)
+  First tokens: [KW:WITH] [ID:regional_sales] [KW:AS] [DEL:(] [KW:SELECT] ...
+
+[15] Testing: complex_window_1
+SQL: SELECT 
+    employee_id,
+    department,
+    salary,
+    AVG...
+  ✓ Tokens: 89 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:employee_id] [DEL:,] [ID:department] [DEL:,] ...
+
+[16] Testing: complex_recursive_cte
+SQL: WITH RECURSIVE employee_hierarchy AS (
+    -- Anchor: top-le...
+  ✓ Tokens: 87 (clean, EOF present)
+  First tokens: [KW:WITH] [KW:RECURSIVE] [ID:employee_hierarchy] [KW:AS] [DEL:(] ...
+
+[17] Testing: complex_pivot_1
+SQL: SELECT 
+    product_category,
+    SUM(CASE WHEN EXTRACT(MONT...
+  ✓ Tokens: 154 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:product_category] [DEL:,] [ID:SUM] [DEL:(] ...
+
+[18] Testing: complex_lateral_join
+SQL: SELECT 
+    c.customer_id,
+    c.customer_name,
+    recent_o...
+  ✓ Tokens: 101 (clean, EOF present)
+  First tokens: [KW:SELECT] [ID:c] [OP:.] [ID:customer_id] [DEL:,] ...
+
+[19] Testing: extreme_analytical_1
+SQL: WITH RECURSIVE date_series AS (
+    SELECT DATE '2024-01-01'...
+  ✓ Tokens: 510 (clean, EOF present)
+  First tokens: [KW:WITH] [KW:RECURSIVE] [ID:date_series] [KW:AS] [DEL:(] ...
+
+[20] Testing: extreme_nested_json
+SQL: WITH order_details AS (
+    SELECT 
+        o.id,
+        o....
+  ✓ Tokens: 612 (clean, EOF present)
+  First tokens: [KW:WITH] [ID:order_details] [KW:AS] [DEL:(] [KW:SELECT] ...
+
+[21] Testing: extreme_ddl_transaction
+SQL: BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+
+CREATE SCHE...
+  ✓ Tokens: 694 (clean, EOF present)
+  First tokens: [KW:BEGIN] [KW:TRANSACTION] [KW:ISOLATION] [KW:LEVEL] [KW:SERIALIZABLE] ...
+
+[22] Testing: extreme_merge_upsert
+SQL: WITH source_data AS (
+    SELECT 
+        s.external_id,
+   ...
+  ✓ Tokens: 430 (clean, EOF present)
+  First tokens: [KW:WITH] [ID:source_data] [KW:AS] [DEL:(] [KW:SELECT] ...
+
+==================================
+SQL Test Suite Results:
+  Total: 22 queries
+  Passed: 22
+  Failed: 0
+✅ ALL SQL TEST SUITE QUERIES TOKENIZED CORRECTLY!
+
+==================================
+✅ ALL TOKENIZER VERIFICATION TESTS PASSED!
+==================================
+
+The tokenizer is producing correct tokens for the parser.
+<end of output>
+Test time =   0.12 sec
+----------------------------------------------------------
+Test Passed.
+"test_tokenizer_verification" end time: Aug 30 11:12 PDT
+"test_tokenizer_verification" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/25 Testing: test_parser_basic
+2/25 Test: test_parser_basic
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_parser_basic"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_parser_basic" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 10 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 10 tests from BasicParserTest
+[ RUN      ] BasicParserTest.EmptyInput
+[       OK ] BasicParserTest.EmptyInput (0 ms)
+[ RUN      ] BasicParserTest.SimpleSelect
+[       OK ] BasicParserTest.SimpleSelect (0 ms)
+[ RUN      ] BasicParserTest.InvalidSQL
+[       OK ] BasicParserTest.InvalidSQL (0 ms)
+[ RUN      ] BasicParserTest.SelectWithColumns
+[       OK ] BasicParserTest.SelectWithColumns (0 ms)
+[ RUN      ] BasicParserTest.SelectWithWhere
+[       OK ] BasicParserTest.SelectWithWhere (0 ms)
+[ RUN      ] BasicParserTest.SimpleInsert
+[       OK ] BasicParserTest.SimpleInsert (0 ms)
+[ RUN      ] BasicParserTest.SimpleUpdate
+[       OK ] BasicParserTest.SimpleUpdate (0 ms)
+[ RUN      ] BasicParserTest.SimpleDelete
+[       OK ] BasicParserTest.SimpleDelete (0 ms)
+[ RUN      ] BasicParserTest.MemoryManagement
+[       OK ] BasicParserTest.MemoryManagement (0 ms)
+[ RUN      ] BasicParserTest.NodeCount
+[       OK ] BasicParserTest.NodeCount (0 ms)
+[----------] 10 tests from BasicParserTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 10 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 10 tests.
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Passed.
+"test_parser_basic" end time: Aug 30 11:12 PDT
+"test_parser_basic" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/25 Testing: test_parser_select
+3/25 Test: test_parser_select
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_parser_select"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_parser_select" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 21 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 21 tests from SelectParserTest
+[ RUN      ] SelectParserTest.SelectStarHasCorrectStructure
+[       OK ] SelectParserTest.SelectStarHasCorrectStructure (0 ms)
+[ RUN      ] SelectParserTest.SelectListWithColumns
+[       OK ] SelectParserTest.SelectListWithColumns (0 ms)
+[ RUN      ] SelectParserTest.FromClauseWithTable
+[       OK ] SelectParserTest.FromClauseWithTable (0 ms)
+[ RUN      ] SelectParserTest.WhereClausePresent
+[       OK ] SelectParserTest.WhereClausePresent (0 ms)
+[ RUN      ] SelectParserTest.WhereWithBinaryExpression
+[       OK ] SelectParserTest.WhereWithBinaryExpression (0 ms)
+[ RUN      ] SelectParserTest.OrderByClause
+[       OK ] SelectParserTest.OrderByClause (0 ms)
+[ RUN      ] SelectParserTest.OrderByWithDirection
+[       OK ] SelectParserTest.OrderByWithDirection (0 ms)
+[ RUN      ] SelectParserTest.LimitClause
+[       OK ] SelectParserTest.LimitClause (0 ms)
+[ RUN      ] SelectParserTest.LimitWithOffset
+[       OK ] SelectParserTest.LimitWithOffset (0 ms)
+[ RUN      ] SelectParserTest.ColumnIdentifiers
+[       OK ] SelectParserTest.ColumnIdentifiers (0 ms)
+[ RUN      ] SelectParserTest.QualifiedColumnNames
+[       OK ] SelectParserTest.QualifiedColumnNames (0 ms)
+[ RUN      ] SelectParserTest.ExpressionInSelectList
+[       OK ] SelectParserTest.ExpressionInSelectList (0 ms)
+[ RUN      ] SelectParserTest.FunctionCallInSelect
+[       OK ] SelectParserTest.FunctionCallInSelect (0 ms)
+[ RUN      ] SelectParserTest.CompleteSelectStatement
+[       OK ] SelectParserTest.CompleteSelectStatement (0 ms)
+[ RUN      ] SelectParserTest.ColumnAlias
+[       OK ] SelectParserTest.ColumnAlias (0 ms)
+[ RUN      ] SelectParserTest.TableAlias
+[       OK ] SelectParserTest.TableAlias (0 ms)
+[ RUN      ] SelectParserTest.SelectStar
+[       OK ] SelectParserTest.SelectStar (0 ms)
+[ RUN      ] SelectParserTest.QualifiedStar
+[       OK ] SelectParserTest.QualifiedStar (0 ms)
+[ RUN      ] SelectParserTest.DistinctSimple
+[       OK ] SelectParserTest.DistinctSimple (0 ms)
+[ RUN      ] SelectParserTest.DistinctMultipleColumns
+[       OK ] SelectParserTest.DistinctMultipleColumns (0 ms)
+[ RUN      ] SelectParserTest.DistinctWithStar
+[       OK ] SelectParserTest.DistinctWithStar (0 ms)
+[----------] 21 tests from SelectParserTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 21 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 21 tests.
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Passed.
+"test_parser_select" end time: Aug 30 11:12 PDT
+"test_parser_select" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/25 Testing: test_parser_correctness
+4/25 Test: test_parser_correctness
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_parser_correctness"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_parser_correctness" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 17 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 17 tests from ParserCorrectnessTest
+[ RUN      ] ParserCorrectnessTest.SimpleSelectStructure
+[       OK ] ParserCorrectnessTest.SimpleSelectStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.QualifiedColumnCorrectness
+[       OK ] ParserCorrectnessTest.QualifiedColumnCorrectness (0 ms)
+[ RUN      ] ParserCorrectnessTest.WhereClauseStructure
+[       OK ] ParserCorrectnessTest.WhereClauseStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.FunctionCallStructure
+[       OK ] ParserCorrectnessTest.FunctionCallStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.OrderByStructure
+[       OK ] ParserCorrectnessTest.OrderByStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.ComplexExpressionStructure
+[       OK ] ParserCorrectnessTest.ComplexExpressionStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.ParentChildRelationships
+[       OK ] ParserCorrectnessTest.ParentChildRelationships (0 ms)
+[ RUN      ] ParserCorrectnessTest.SiblingRelationships
+[       OK ] ParserCorrectnessTest.SiblingRelationships (0 ms)
+[ RUN      ] ParserCorrectnessTest.LiteralTypes
+[       OK ] ParserCorrectnessTest.LiteralTypes (0 ms)
+[ RUN      ] ParserCorrectnessTest.EmptySelectList
+[       OK ] ParserCorrectnessTest.EmptySelectList (0 ms)
+[ RUN      ] ParserCorrectnessTest.MissingFromClause
+[       OK ] ParserCorrectnessTest.MissingFromClause (0 ms)
+[ RUN      ] ParserCorrectnessTest.MultipleWhereConditions
+[       OK ] ParserCorrectnessTest.MultipleWhereConditions (0 ms)
+[ RUN      ] ParserCorrectnessTest.InsertStatementStructure
+[       OK ] ParserCorrectnessTest.InsertStatementStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.UpdateStatementStructure
+[       OK ] ParserCorrectnessTest.UpdateStatementStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.DeleteStatementStructure
+[       OK ] ParserCorrectnessTest.DeleteStatementStructure (0 ms)
+[ RUN      ] ParserCorrectnessTest.NodeIDsAreUnique
+[       OK ] ParserCorrectnessTest.NodeIDsAreUnique (0 ms)
+[ RUN      ] ParserCorrectnessTest.DebugPrintComplexQuery
+
+=== AST Structure ===
+SelectStmt (id:1, children:6)
+  SelectList (id:3, children:3)
+    ColumnRef [u.id] (id:2, children:0)
+    ColumnRef [u.name] (id:4, children:0)
+    FunctionCall [COUNT] (id:5, children:1)
+      Star (id:6, children:0)
+  FromClause (id:8, children:1)
+    TableRef [users] (id:7, children:0)
+  WhereClause (id:12, children:1)
+    BinaryExpr [>] (id:11, children:2)
+      ColumnRef [u.age] (id:9, children:0)
+      IntegerLiteral [21] (id:10, children:0)
+  GroupByClause (id:13, children:2)
+    ColumnRef [u.id] (id:14, children:0)
+    ColumnRef [u.name] (id:15, children:0)
+  OrderByClause (id:18, children:1)
+    FunctionCall [COUNT] (id:16, children:1)
+      Star (id:17, children:0)
+  LimitClause (id:19, children:1)
+    IntegerLiteral [10] (id:20, children:0)
+===================
+[       OK ] ParserCorrectnessTest.DebugPrintComplexQuery (0 ms)
+[----------] 17 tests from ParserCorrectnessTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 17 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 17 tests.
+<end of output>
+Test time =   0.11 sec
+----------------------------------------------------------
+Test Passed.
+"test_parser_correctness" end time: Aug 30 11:12 PDT
+"test_parser_correctness" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/25 Testing: test_parser_capabilities
+5/25 Test: test_parser_capabilities
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_parser_capabilities"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_parser_capabilities" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 10 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 10 tests from ParserCapabilitiesTest
+[ RUN      ] ParserCapabilitiesTest.BasicSelectCapabilities
+
+==== BASIC SELECT CAPABILITIES ====
+✓ Basic SELECT features work
+[       OK ] ParserCapabilitiesTest.BasicSelectCapabilities (0 ms)
+[ RUN      ] ParserCapabilitiesTest.WhereClauseCapabilities
+
+==== WHERE CLAUSE CAPABILITIES ====
+✓ WHERE clause with AND/OR works
+[       OK ] ParserCapabilitiesTest.WhereClauseCapabilities (0 ms)
+[ RUN      ] ParserCapabilitiesTest.ExpressionCapabilities
+
+==== EXPRESSION CAPABILITIES ====
+✓ Expression parsing with precedence works
+[       OK ] ParserCapabilitiesTest.ExpressionCapabilities (0 ms)
+[ RUN      ] ParserCapabilitiesTest.FunctionCapabilities
+
+==== FUNCTION CAPABILITIES ====
+✓ Function calls work (simplified argument parsing)
+[       OK ] ParserCapabilitiesTest.FunctionCapabilities (0 ms)
+[ RUN      ] ParserCapabilitiesTest.OrderByCapabilities
+
+==== ORDER BY CAPABILITIES ====
+✓ ORDER BY with multiple columns works
+[       OK ] ParserCapabilitiesTest.OrderByCapabilities (0 ms)
+[ RUN      ] ParserCapabilitiesTest.LimitOffsetCapabilities
+
+==== LIMIT/OFFSET CAPABILITIES ====
+✓ LIMIT/OFFSET works
+[       OK ] ParserCapabilitiesTest.LimitOffsetCapabilities (0 ms)
+[ RUN      ] ParserCapabilitiesTest.ComplexRealWorldQueries
+
+==== COMPLEX REAL-WORLD QUERIES ====
+
+=== E-commerce Order Query ===
+SQL: SELECT o.id, u.name, p.title, o.quantity * p.price FROM orders o, users u, products p WHERE o.user_id = u.id AND o.product_id = p.id AND o.status = 'shipped' AND o.date > '2024-01-01' ORDER BY o.date DESC LIMIT 100
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 5
+
+=== Analytics Query with Aggregates ===
+SQL: SELECT COUNT(*), MAX(amount), MIN(amount), AVG(amount) FROM transactions WHERE status = 'completed' AND amount > 0 AND date >= '2024-01-01' AND date <= '2024-12-31'
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 3
+
+=== User Search with Multiple Conditions ===
+SQL: SELECT u.id, u.name, u.email, p.name, p.avatar FROM users u, profiles p WHERE u.id = p.user_id AND (u.name LIKE '%john%' OR u.email LIKE '%john%') AND u.status = 'active' AND u.verified = 1 ORDER BY u.created_at DESC LIMIT 20
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 5
+[       OK ] ParserCapabilitiesTest.ComplexRealWorldQueries (0 ms)
+[ RUN      ] ParserCapabilitiesTest.CurrentLimitations
+
+==== CURRENT LIMITATIONS ====
+
+=== Subquery (not supported) ===
+SQL: SELECT * FROM users WHERE id IN (SELECT user_id FROM orders)
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 3
+
+=== CASE expression (not supported) ===
+SQL: SELECT CASE WHEN age < 18 THEN 'minor' ELSE 'adult' END FROM users
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 2
+
+=== UNION (not supported) ===
+SQL: SELECT id FROM users UNION SELECT id FROM customers
+✓ PARSED SUCCESSFULLY
+  Root: Other, Children: 2
+
+=== CTE/WITH (not supported) ===
+SQL: WITH active_users AS (SELECT * FROM users WHERE status = 'active') SELECT * FROM active_users
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 3
+
+=== Window functions (not supported) ===
+SQL: SELECT id, ROW_NUMBER() OVER (ORDER BY id) FROM users
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 2
+
+=== DISTINCT (not supported) ===
+SQL: SELECT DISTINCT category FROM products
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 2
+[       OK ] ParserCapabilitiesTest.CurrentLimitations (0 ms)
+[ RUN      ] ParserCapabilitiesTest.StressTestComplexQuery
+
+==== STRESS TEST - Maximum Complexity ====
+
+=== Maximum Complexity Query ===
+SQL: SELECT   u.id, u.name, u.email,   p.title, p.description, p.price * 1.2,   c.name, c.discount,   o.quantity, o.quantity * p.price * (1 - c.discount / 100),   s.status, s.tracking_number,   COUNT(*), MAX(p.price), MIN(p.price), SUM(o.quantity) FROM   users u, products p, categories c, orders o, shipments s WHERE   u.id = o.user_id AND   p.id = o.product_id AND   c.id = p.category_id AND   o.id = s.order_id AND   u.status = 'active' AND   u.verified = 1 AND   p.stock > 0 AND   p.price > 10 AND p.price < 1000 AND   c.active = 1 AND   o.status = 'paid' OR o.status = 'shipped' AND   o.date > '2024-01-01' AND o.date < '2024-12-31' AND   s.status = 'delivered' OR s.status = 'in_transit' ORDER BY   o.date DESC, p.price ASC, u.name, c.name DESC, o.quantity LIMIT 100 OFFSET 500
+✓ PARSED SUCCESSFULLY
+  Root: SELECT, Children: 5
+[       OK ] ParserCapabilitiesTest.StressTestComplexQuery (0 ms)
+[ RUN      ] ParserCapabilitiesTest.CapabilitySummary
+
+========================================
+    DB25 PARSER SELECT CAPABILITIES    
+========================================
+
+✅ SUPPORTED FEATURES:
+  • SELECT with multiple columns
+  • Column aliases (parsed but not stored)
+  • Qualified column names (table.column)
+  • SELECT * and table.*
+  • FROM with multiple tables (comma-separated)
+  • Table aliases
+  • JOIN clauses (INNER, LEFT, RIGHT, FULL OUTER, CROSS)
+  • JOIN ON conditions with complex expressions
+  • WHERE with comparison operators (=, <, >, <=, >=, <>)
+  • AND/OR boolean operators with proper precedence
+  • NOT operator (unary)
+  • Arithmetic expressions (+, -, *, /, %)
+  • Unary operators (-, +)
+  • GROUP BY with multiple columns and expressions
+  • GROUP BY with positional references (1, 2)
+  • HAVING clause with aggregate conditions
+  • Aggregate functions (COUNT(*), SUM, AVG, MIN, MAX)
+  • Function calls with arguments
+  • ORDER BY with multiple columns and ASC/DESC
+  • LIMIT and OFFSET
+  • BETWEEN x AND y operator
+  • IN (list) operator
+  • LIKE pattern matching
+  • IS NULL / IS NOT NULL
+  • Literals (integers, strings)
+  • Operator precedence (OR < AND < SQL ops < comparison < arithmetic)
+
+❌ NOT SUPPORTED:
+  • Subqueries (IN with SELECT, EXISTS, scalar subqueries)
+  • DISTINCT
+  • CASE expressions
+  • UNION, INTERSECT, EXCEPT
+  • CTEs (WITH clause)
+  • Window functions
+  • Type casting (::type or CAST)
+  • Comments in SQL
+
+📊 COMPLEXITY LEVEL:
+  Can handle: Medium complexity queries
+  - Multi-table queries (using WHERE joins)
+  - Complex WHERE conditions with AND/OR
+  - Expressions with arithmetic
+  - Multiple ORDER BY columns
+  - Aggregate functions (parsing only)
+
+🎯 SUITABLE FOR:
+  - Simple to medium CRUD operations
+  - Basic reporting queries
+  - Query analysis and AST generation
+  - Educational purposes
+  - Embedded SQL parsing
+
+⚠️  PRODUCTION READINESS:
+  - ~40% SQL-92 coverage
+  - Good for basic SELECT/INSERT/UPDATE/DELETE
+  - Not suitable for complex analytics
+  - Missing critical features for production DBMS
+========================================
+
+[       OK ] ParserCapabilitiesTest.CapabilitySummary (0 ms)
+[----------] 10 tests from ParserCapabilitiesTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 10 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 10 tests.
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Passed.
+"test_parser_capabilities" end time: Aug 30 11:12 PDT
+"test_parser_capabilities" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/25 Testing: test_join_parsing
+6/25 Test: test_join_parsing
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_join_parsing"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_join_parsing" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from JoinParsingTest
+[ RUN      ] JoinParsingTest.CurrentJoinBehavior
+
+=== Current JOIN Parsing Behavior ===
+
+SQL: SELECT * FROM users JOIN orders ON users.id = orders.user_id
+AST Structure:
+SelectStmt
+  SelectList
+    Star
+  FromClause
+    TableRef [users]
+    JoinClause [JOIN]
+      TableRef [orders]
+      BinaryExpr [=]
+        ColumnRef [users.id]
+        ColumnRef [orders.user_id]
+
+SQL: SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id
+AST Structure:
+SelectStmt
+  SelectList
+    Star
+  FromClause
+    TableRef [users]
+    JoinClause [LEFT JOIN]
+      TableRef [orders]
+      BinaryExpr [=]
+        ColumnRef [users.id]
+        ColumnRef [orders.user_id]
+
+SQL: SELECT * FROM users u JOIN orders o ON u.id = o.user_id JOIN products p ON o.product_id = p.id
+AST Structure:
+SelectStmt
+  SelectList
+    Star
+  FromClause
+    TableRef [users]
+    JoinClause [JOIN]
+      TableRef [orders]
+      BinaryExpr [=]
+        ColumnRef [u.id]
+        ColumnRef [o.user_id]
+    JoinClause [JOIN]
+      TableRef [products]
+      BinaryExpr [=]
+        ColumnRef [o.product_id]
+        ColumnRef [p.id]
+[       OK ] JoinParsingTest.CurrentJoinBehavior (0 ms)
+[----------] 1 test from JoinParsingTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Passed.
+"test_join_parsing" end time: Aug 30 11:12 PDT
+"test_join_parsing" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/25 Testing: test_join_comprehensive
+7/25 Test: test_join_comprehensive
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_join_comprehensive"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_join_comprehensive" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 12 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 12 tests from JoinComprehensiveTest
+[ RUN      ] JoinComprehensiveTest.InnerJoin
+[       OK ] JoinComprehensiveTest.InnerJoin (0 ms)
+[ RUN      ] JoinComprehensiveTest.LeftJoin
+[       OK ] JoinComprehensiveTest.LeftJoin (0 ms)
+[ RUN      ] JoinComprehensiveTest.LeftOuterJoin
+[       OK ] JoinComprehensiveTest.LeftOuterJoin (0 ms)
+[ RUN      ] JoinComprehensiveTest.RightJoin
+[       OK ] JoinComprehensiveTest.RightJoin (0 ms)
+[ RUN      ] JoinComprehensiveTest.FullOuterJoin
+[       OK ] JoinComprehensiveTest.FullOuterJoin (0 ms)
+[ RUN      ] JoinComprehensiveTest.CrossJoin
+[       OK ] JoinComprehensiveTest.CrossJoin (0 ms)
+[ RUN      ] JoinComprehensiveTest.MultipleJoins
+[       OK ] JoinComprehensiveTest.MultipleJoins (0 ms)
+[ RUN      ] JoinComprehensiveTest.JoinWithComplexCondition
+[       OK ] JoinComprehensiveTest.JoinWithComplexCondition (0 ms)
+[ RUN      ] JoinComprehensiveTest.MixedJoinStyles
+[       OK ] JoinComprehensiveTest.MixedJoinStyles (0 ms)
+[ RUN      ] JoinComprehensiveTest.JoinWithUsing
+/Users/chiradip/codes/DB25-parser2/tests/test_join_comprehensive.cpp:185: Failure
+Expected equality of these values:
+  join->child_count
+    Which is: 2
+  1
+[  FAILED  ] JoinComprehensiveTest.JoinWithUsing (0 ms)
+[ RUN      ] JoinComprehensiveTest.JoinFollowedByWhere
+[       OK ] JoinComprehensiveTest.JoinFollowedByWhere (0 ms)
+[ RUN      ] JoinComprehensiveTest.JoinWithTableAliases
+[       OK ] JoinComprehensiveTest.JoinWithTableAliases (0 ms)
+[----------] 12 tests from JoinComprehensiveTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 11 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] JoinComprehensiveTest.JoinWithUsing
+
+ 1 FAILED TEST
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Failed.
+"test_join_comprehensive" end time: Aug 30 11:12 PDT
+"test_join_comprehensive" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/25 Testing: test_sql_operators
+8/25 Test: test_sql_operators
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_sql_operators"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_sql_operators" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 12 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 12 tests from SQLOperatorsTest
+[ RUN      ] SQLOperatorsTest.BetweenOperator
+[       OK ] SQLOperatorsTest.BetweenOperator (0 ms)
+[ RUN      ] SQLOperatorsTest.InOperator
+[       OK ] SQLOperatorsTest.InOperator (0 ms)
+[ RUN      ] SQLOperatorsTest.InOperatorNumbers
+[       OK ] SQLOperatorsTest.InOperatorNumbers (0 ms)
+[ RUN      ] SQLOperatorsTest.LikeOperator
+[       OK ] SQLOperatorsTest.LikeOperator (0 ms)
+[ RUN      ] SQLOperatorsTest.IsNullOperator
+[       OK ] SQLOperatorsTest.IsNullOperator (0 ms)
+[ RUN      ] SQLOperatorsTest.IsNotNullOperator
+[       OK ] SQLOperatorsTest.IsNotNullOperator (0 ms)
+[ RUN      ] SQLOperatorsTest.NotOperator
+[       OK ] SQLOperatorsTest.NotOperator (0 ms)
+[ RUN      ] SQLOperatorsTest.NotWithComparison
+[       OK ] SQLOperatorsTest.NotWithComparison (0 ms)
+[ RUN      ] SQLOperatorsTest.UnaryMinus
+[       OK ] SQLOperatorsTest.UnaryMinus (0 ms)
+[ RUN      ] SQLOperatorsTest.NegativeNumberLiteral
+[       OK ] SQLOperatorsTest.NegativeNumberLiteral (0 ms)
+[ RUN      ] SQLOperatorsTest.ComplexExpression
+[       OK ] SQLOperatorsTest.ComplexExpression (0 ms)
+[ RUN      ] SQLOperatorsTest.OperatorPrecedence
+[       OK ] SQLOperatorsTest.OperatorPrecedence (0 ms)
+[----------] 12 tests from SQLOperatorsTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 12 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 12 tests.
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Passed.
+"test_sql_operators" end time: Aug 30 11:12 PDT
+"test_sql_operators" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/25 Testing: test_group_by
+9/25 Test: test_group_by
+Command: "/Users/chiradip/codes/DB25-parser2/build/test_group_by"
+Directory: /Users/chiradip/codes/DB25-parser2/build
+"test_group_by" start time: Aug 30 11:12 PDT
+Output:
+----------------------------------------------------------
+Running main() from /Users/chiradip/codes/DB25-parser2/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 15 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 15 tests from GroupByTest
+[ RUN      ] GroupByTest.SimpleGroupBy
+[       OK ] GroupByTest.SimpleGroupBy (0 ms)
+[ RUN      ] GroupByTest.MultipleGroupByColumns
+[       OK ] GroupByTest.MultipleGroupByColumns (0 ms)
+[ RUN      ] GroupByTest.GroupByWithExpression
+[       OK ] GroupByTest.GroupByWithExpression (0 ms)
+[ RUN      ] GroupByTest.GroupByWithHaving
+[       OK ] GroupByTest.GroupByWithHaving (0 ms)
+[ RUN      ] GroupByTest.HavingWithoutGroupBy
+[       OK ] GroupByTest.HavingWithoutGroupBy (0 ms)
+[ RUN      ] GroupByTest.AggregateFunction_COUNT
+[       OK ] GroupByTest.AggregateFunction_COUNT (0 ms)
+[ RUN      ] GroupByTest.AggregateFunction_SUM
+[       OK ] GroupByTest.AggregateFunction_SUM (0 ms)
+[ RUN      ] GroupByTest.AggregateFunction_AVG
+[       OK ] GroupByTest.AggregateFunction_AVG (0 ms)
+[ RUN      ] GroupByTest.AggregateFunction_MIN
+[       OK ] GroupByTest.AggregateFunction_MIN (0 ms)
+[ RUN      ] GroupByTest.AggregateFunction_MAX
+[       OK ] GroupByTest.AggregateFunction_MAX (0 ms)
+[ RUN      ] GroupByTest.MultipleAggregates
+[       OK ] GroupByTest.MultipleAggregates (0 ms)
+[ RUN      ] GroupByTest.GroupByWithOrderBy
+[       OK ] GroupByTest.GroupByWithOrderBy (0 ms)
+[ RUN      ] GroupByTest.ComplexHavingCondition
+[       OK ] GroupByTest.ComplexHavingCondition (0 ms)
+[ RUN      ] GroupByTest.GroupByQualifiedColumns
+[       OK ] GroupByTest.GroupByQualifiedColumns (0 ms)
+[ RUN      ] GroupByTest.GroupByPosition
+[       OK ] GroupByTest.GroupByPosition (0 ms)
+[----------] 15 tests from GroupByTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 15 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 15 tests.
+<end of output>

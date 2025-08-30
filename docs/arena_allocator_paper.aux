@@ -1,0 +1,61 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Design Goals}{1}{subsection.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Architecture}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Core Concepts}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Arena allocator with multiple blocks showing geometric growth pattern}}{2}{figure.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:arena_blocks}{{1}{2}{Arena allocator with multiple blocks showing geometric growth pattern}{figure.caption.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Block Management}{2}{subsection.2.2}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1}{\ignorespaces Block structure}}{2}{lstlisting.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Allocation Algorithm}{2}{subsection.2.3}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces Arena Allocation}}{3}{algorithm.1}\protected@file@percent }
+\newlabel{alg:allocate}{{1}{3}{Arena Allocation}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Performance Characteristics}{3}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Time Complexity}{3}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Space Efficiency}{3}{subsection.3.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Memory efficiency vs allocation size for different patterns}}{3}{figure.caption.2}\protected@file@percent }
+\newlabel{fig:efficiency}{{2}{3}{Memory efficiency vs allocation size for different patterns}{figure.caption.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Implementation Details}{4}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Alignment Handling}{4}{subsection.4.1}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {2}{\ignorespaces Alignment implementation}}{4}{lstlisting.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Thread-Local Storage}{4}{subsection.4.2}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {3}{\ignorespaces Thread-local arena access}}{4}{lstlisting.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Cache-Line Optimization}{4}{subsection.4.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Cache-line aligned AST nodes preventing false sharing}}{4}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:cache_alignment}{{3}{4}{Cache-line aligned AST nodes preventing false sharing}{figure.caption.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Performance Evaluation}{5}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Microbenchmarks}{5}{subsection.5.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Arena allocator performance metrics}}{5}{table.caption.4}\protected@file@percent }
+\newlabel{tab:performance}{{1}{5}{Arena allocator performance metrics}{table.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}AST Construction Benchmark}{5}{subsection.5.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces AST construction performance: Arena vs traditional allocation}}{5}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:ast_performance}{{4}{5}{AST construction performance: Arena vs traditional allocation}{figure.caption.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Memory Safety and Testing}{5}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Safety Properties}{5}{subsection.6.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Test suite coverage}}{6}{table.caption.6}\protected@file@percent }
+\newlabel{tab:testing}{{2}{6}{Test suite coverage}{table.caption.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Test Coverage}{6}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Design Trade-offs}{6}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Advantages}{6}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Limitations}{6}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Related Work}{6}{section.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {9}Future Work}{7}{section.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}NUMA Awareness}{7}{subsection.9.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.2}Memory Pooling}{7}{subsection.9.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.3}Profiling Integration}{7}{subsection.9.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.4}Custom Allocator Traits}{7}{subsection.9.4}\protected@file@percent }
+\bibcite{knuth1973}{1}
+\bibcite{wilson1995}{2}
+\bibcite{berger2001}{3}
+\bibcite{llvm2024}{4}
+\bibcite{rust2024}{5}
+\bibcite{evans2006}{6}
+\bibcite{gay1998}{7}
+\bibcite{hanson1990}{8}
+\bibcite{apache2024}{9}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{8}{section.10}\protected@file@percent }
+\gdef \@abspage@last{8}

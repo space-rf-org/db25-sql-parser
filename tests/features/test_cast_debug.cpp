@@ -1,0 +1,26 @@
+#include <iostream>
+#include <string>
+#include "db25/parser/parser.hpp"
+
+using namespace db25;
+using namespace db25::parser;
+
+int main() {
+    Parser parser;
+    
+    std::string sql = "SELECT CAST(id AS VARCHAR(10)) FROM t";
+    std::cout << "Testing: " << sql << std::endl;
+    
+    auto result = parser.parse(sql);
+    
+    if (result.has_value()) {
+        std::cout << "✓ Parse successful!" << std::endl;
+    } else {
+        const auto& error = result.error();
+        std::cout << "✗ Parse failed at line " << error.line 
+                  << ", column " << error.column 
+                  << ": " << error.message << std::endl;
+    }
+    
+    return 0;
+}

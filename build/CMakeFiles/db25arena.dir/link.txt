@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdb25arena.a CMakeFiles/db25arena.dir/src/memory/arena.cpp.o
+/usr/bin/ranlib libdb25arena.a
