@@ -1,0 +1,656 @@
+/*
+ * DB25 SQL Parser - Professional AST Viewer
+ * 
+ * A sophisticated tool for visualizing Abstract Syntax Trees from SQL queries.
+ * Supports both piped input and file-based input with advanced formatting.
+ * 
+ * Usage:
+ *   echo "SELECT * FROM users" | ast_viewer
+ *   ast_viewer --file queries.sqls --index 3
+ *   ast_viewer --file queries.sqls --all
+ *   ast_viewer --help
+ */
+
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <chrono>
+#include <filesystem>
+#include <iomanip>
+#include <unistd.h>
+#include <expected>
+
+#include "db25/parser/parser.hpp"
+#include "db25/ast/ast_node.hpp"
+#include "db25/ast/node_types.hpp"
+
+namespace {
+
+// ANSI color codes for stunning visual output
+namespace colors {
+    const char* RESET = "\033[0m";
+    const char* BOLD = "\033[1m";
+    const char* DIM = "\033[2m";
+    const char* ITALIC = "\033[3m";
+    const char* UNDERLINE = "\033[4m";
+    
+    // Node type colors
+    const char* STMT_COLOR = "\033[38;5;196m";    // Red for statements
+    const char* CLAUSE_COLOR = "\033[38;5;33m";   // Blue for clauses  
+    const char* EXPR_COLOR = "\033[38;5;208m";    // Orange for expressions
+    const char* REF_COLOR = "\033[38;5;226m";     // Yellow for references
+    const char* LITERAL_COLOR = "\033[38;5;46m";  // Green for literals
+    const char* JOIN_COLOR = "\033[38;5;201m";    // Magenta for joins
+    const char* FUNC_COLOR = "\033[38;5;51m";     // Cyan for functions
+    const char* OPERATOR_COLOR = "\033[38;5;99m"; // Purple for operators
+    
+    // Background colors for headers
+    const char* BG_BLUE = "\033[48;5;17m";
+    const char* BG_GREEN = "\033[48;5;22m";
+    const char* BG_PURPLE = "\033[48;5;54m";
+}
+
+// Box drawing characters for tree visualization
+struct BoxStyle {
+    const char* VERTICAL;
+    const char* HORIZONTAL;
+    const char* BRANCH;
+    const char* LAST_BRANCH;
+    const char* SPACE;
+};
+
+namespace box {
+    // Unicode box drawing (for color mode)
+    const BoxStyle unicode = {
+        "│",    // VERTICAL
+        "─",    // HORIZONTAL
+        "├─",   // BRANCH
+        "└─",   // LAST_BRANCH
+        "  "    // SPACE
+    };
+    
+    // ASCII box drawing (for simple mode or no-color)
+    const BoxStyle ascii = {
+        "|",    // VERTICAL
+        "-",    // HORIZONTAL
+        "|-",   // BRANCH
+        "`-",   // LAST_BRANCH
+        "  "    // SPACE
+    };
+}
+
+// Get node type name as string
+const char* get_node_type_name(db25::ast::NodeType type) {
+    using namespace db25::ast;
+    
+    switch(type) {
+        // Statements
+        case NodeType::SelectStmt: return "SELECT";
+        case NodeType::InsertStmt: return "INSERT";
+        case NodeType::UpdateStmt: return "UPDATE";
+        case NodeType::DeleteStmt: return "DELETE";
+        case NodeType::CreateTableStmt: return "CREATE TABLE";
+        case NodeType::CreateIndexStmt: return "CREATE INDEX";
+        case NodeType::CreateViewStmt: return "CREATE VIEW";
+        case NodeType::AlterTableStmt: return "ALTER TABLE";
+        case NodeType::DropStmt: return "DROP";
+        case NodeType::TruncateStmt: return "TRUNCATE";
+        
+        // Clauses
+        case NodeType::FromClause: return "FROM";
+        case NodeType::WhereClause: return "WHERE";
+        case NodeType::GroupByClause: return "GROUP BY";
+        case NodeType::HavingClause: return "HAVING";
+        case NodeType::OrderByClause: return "ORDER BY";
+        case NodeType::LimitClause: return "LIMIT";
+        case NodeType::JoinClause: return "JOIN";
+        case NodeType::WithClause: return "WITH";
+        case NodeType::WindowSpec: return "WINDOW";
+        case NodeType::PartitionByClause: return "PARTITION BY";
+        case NodeType::ValuesClause: return "VALUES";
+        case NodeType::SetClause: return "SET";
+        case NodeType::ReturningClause: return "RETURNING";
+        case NodeType::OnConflictClause: return "ON CONFLICT";
+        case NodeType::UsingClause: return "USING";
+        
+        // Expressions
+        case NodeType::BinaryExpr: return "BINARY";
+        case NodeType::UnaryExpr: return "UNARY";
+        case NodeType::FunctionCall: return "FUNCTION";
+        case NodeType::CaseExpr: return "CASE";
+        case NodeType::CastExpr: return "CAST";
+        case NodeType::SubqueryExpr: return "SUBQUERY";
+        case NodeType::ExistsExpr: return "EXISTS";
+        case NodeType::InExpr: return "IN";
+        case NodeType::BetweenExpr: return "BETWEEN";
+        case NodeType::LikeExpr: return "LIKE";
+        case NodeType::IsNullExpr: return "IS NULL";
+        case NodeType::WindowFunction: return "WINDOW FUNC";
+        case NodeType::RowExpr: return "ROW";
+        
+        // References
+        case NodeType::TableRef: return "TABLE";
+        case NodeType::ColumnRef: return "COLUMN";
+        case NodeType::AliasRef: return "ALIAS";
+        case NodeType::SchemaRef: return "SCHEMA";
+        case NodeType::Star: return "*";
+        
+        // Literals
+        case NodeType::IntegerLiteral: return "INT";
+        case NodeType::FloatLiteral: return "FLOAT";
+        case NodeType::StringLiteral: return "STRING";
+        case NodeType::BooleanLiteral: return "BOOLEAN";
+        case NodeType::NullLiteral: return "NULL";
+        case NodeType::DateTimeLiteral: return "DATETIME";
+        
+        // Other
+        case NodeType::Identifier: return "IDENTIFIER";
+        case NodeType::SelectList: return "SELECT LIST";
+        case NodeType::ColumnList: return "COLUMN LIST";
+        case NodeType::CTEDefinition: return "CTE";
+        case NodeType::Subquery: return "SUBQUERY";
+        
+        default: {
+            static char buf[32];
+            snprintf(buf, sizeof(buf), "NODE_%d", static_cast<int>(type));
+            return buf;
+        }
+    }
+}
+
+// Get color for node type
+const char* get_node_color(db25::ast::NodeType type) {
+    using namespace db25::ast;
+    
+    // Statements
+    if (type >= NodeType::SelectStmt && type <= NodeType::ReleaseSavepointStmt) {
+        return colors::STMT_COLOR;
+    }
+    
+    // Clauses
+    if (type >= NodeType::SelectList && type <= NodeType::RowExpr) {
+        return colors::CLAUSE_COLOR;
+    }
+    
+    // Expressions
+    if (type >= NodeType::BinaryExpr && type <= NodeType::WindowExpr) {
+        return colors::EXPR_COLOR;
+    }
+    
+    // References
+    if (type >= NodeType::TableRef && type <= NodeType::Star) {
+        return colors::REF_COLOR;
+    }
+    
+    // Literals
+    if (type >= NodeType::IntegerLiteral && type <= NodeType::DateTimeLiteral) {
+        return colors::LITERAL_COLOR;
+    }
+    
+    // Joins
+    if (type >= NodeType::InnerJoin && type <= NodeType::LateralJoin) {
+        return colors::JOIN_COLOR;
+    }
+    
+    // Functions
+    if (type == NodeType::FunctionCall || type == NodeType::WindowFunction) {
+        return colors::FUNC_COLOR;
+    }
+    
+    return colors::DIM;
+}
+
+// Get operator name for binary expressions
+const char* get_binary_op_name(db25::ast::BinaryOp op) {
+    using namespace db25::ast;
+    
+    switch(op) {
+        // Arithmetic
+        case BinaryOp::Add: return "+";
+        case BinaryOp::Subtract: return "-";
+        case BinaryOp::Multiply: return "*";
+        case BinaryOp::Divide: return "/";
+        case BinaryOp::Modulo: return "%";
+        
+        // Comparison
+        case BinaryOp::Equal: return "=";
+        case BinaryOp::NotEqual: return "!=";
+        case BinaryOp::LessThan: return "<";
+        case BinaryOp::LessEqual: return "<=";
+        case BinaryOp::GreaterThan: return ">";
+        case BinaryOp::GreaterEqual: return ">=";
+        
+        // Logical
+        case BinaryOp::And: return "AND";
+        case BinaryOp::Or: return "OR";
+        
+        // String
+        case BinaryOp::Concat: return "||";
+        case BinaryOp::Like: return "LIKE";
+        case BinaryOp::NotLike: return "NOT LIKE";
+        
+        // Other
+        case BinaryOp::Is: return "IS";
+        case BinaryOp::IsNot: return "IS NOT";
+        case BinaryOp::In: return "IN";
+        case BinaryOp::NotIn: return "NOT IN";
+        
+        default: return "OP";
+    }
+}
+
+// Count total nodes in tree
+int count_nodes(const db25::ast::ASTNode* node) {
+    if (!node) return 0;
+    
+    int count = 1;
+    auto* child = node->first_child;
+    while (child) {
+        count += count_nodes(child);
+        child = child->next_sibling;
+    }
+    return count;
+}
+
+// Calculate tree depth
+int calculate_depth(const db25::ast::ASTNode* node, int current = 0) {
+    if (!node) return current;
+    
+    int max_depth = current;
+    auto* child = node->first_child;
+    while (child) {
+        int child_depth = calculate_depth(child, current + 1);
+        if (child_depth > max_depth) max_depth = child_depth;
+        child = child->next_sibling;
+    }
+    return max_depth;
+}
+
+// Beautiful tree dumper with colors and formatting
+void dump_tree(std::ostream& out, const db25::ast::ASTNode* node, 
+               const std::string& prefix, bool is_last, 
+               int depth = 0, bool use_colors = true, bool simple_mode = false) {
+    if (!node) return;
+    
+    // Choose box drawing style
+    const auto& box_style = (use_colors && !simple_mode) ? box::unicode : box::ascii;
+    
+    // Prepare node display
+    std::string branch = is_last ? box_style.LAST_BRANCH : box_style.BRANCH;
+    std::string node_color = use_colors ? get_node_color(node->node_type) : "";
+    std::string reset = use_colors ? colors::RESET : "";
+    std::string bold = use_colors ? colors::BOLD : "";
+    std::string dim = use_colors ? colors::DIM : "";
+    std::string italic = use_colors ? colors::ITALIC : "";
+    
+    // Print branch with color
+    if (use_colors && !simple_mode) {
+        out << prefix << colors::DIM << branch << reset << " ";
+    } else {
+        out << prefix << branch << " ";
+    }
+    
+    // Print node type with enhanced color
+    out << node_color << bold << get_node_type_name(node->node_type) << reset;
+    
+    // Add node details with appropriate coloring
+    if (!node->primary_text.empty()) {
+        if (use_colors) {
+            // Color based on node type
+            if (node->node_type == db25::ast::NodeType::StringLiteral) {
+                out << ": " << colors::LITERAL_COLOR << "'" << node->primary_text << "'" << reset;
+            } else if (node->node_type == db25::ast::NodeType::IntegerLiteral ||
+                       node->node_type == db25::ast::NodeType::FloatLiteral) {
+                out << ": " << colors::LITERAL_COLOR << node->primary_text << reset;
+            } else if (node->node_type == db25::ast::NodeType::TableRef ||
+                       node->node_type == db25::ast::NodeType::ColumnRef) {
+                out << ": " << colors::REF_COLOR << italic << node->primary_text << reset;
+            } else if (node->node_type == db25::ast::NodeType::FunctionCall) {
+                out << ": " << colors::FUNC_COLOR << bold << node->primary_text << "()" << reset;
+            } else {
+                out << ": " << italic << node->primary_text << reset;
+            }
+        } else {
+            out << ": " << node->primary_text;
+        }
+    }
+    
+    // Add operator for binary expressions with color
+    if (node->node_type == db25::ast::NodeType::BinaryExpr) {
+        if (use_colors) {
+            out << " " << colors::OPERATOR_COLOR << bold << "[";
+            // Add specific operator based on semantic_flags or precedence
+            if (node->primary_text.empty()) {
+                out << "OP";
+            } else {
+                out << node->primary_text;
+            }
+            out << "]" << reset;
+        } else {
+            out << " [" << (node->primary_text.empty() ? "OP" : node->primary_text) << "]";
+        }
+    }
+    
+    // Add metadata (only in non-simple mode)
+    if (!simple_mode) {
+        out << dim << " [#" << node->node_id;
+        if (node->child_count > 0) {
+            out << ", " << node->child_count << " child" 
+                << (node->child_count > 1 ? "ren" : "");
+        }
+        if (node->semantic_flags != 0) {
+            out << ", flags=0x" << std::hex << node->semantic_flags << std::dec;
+        }
+        out << "]" << reset;
+    }
+    
+    out << "\n";
+    
+    // Dump children with proper prefixing
+    std::string child_prefix = prefix + (is_last ? box_style.SPACE : box_style.VERTICAL) + " ";
+    auto* child = node->first_child;
+    while (child) {
+        bool child_is_last = (child->next_sibling == nullptr);
+        dump_tree(out, child, child_prefix, child_is_last, depth + 1, use_colors, simple_mode);
+        child = child->next_sibling;
+    }
+}
+
+// Read SQL queries from .sqls file
+std::vector<std::string> read_sqls_file(const std::string& filename) {
+    std::vector<std::string> queries;
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        return queries;
+    }
+    
+    std::string current_query;
+    std::string line;
+    
+    while (std::getline(file, line)) {
+        // Skip comments and empty lines
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        
+        // Check for query separator
+        if (line == "---" || line == "===") {
+            if (!current_query.empty()) {
+                queries.push_back(current_query);
+                current_query.clear();
+            }
+        } else {
+            if (!current_query.empty()) {
+                current_query += " ";
+            }
+            current_query += line;
+        }
+    }
+    
+    // Add last query if exists
+    if (!current_query.empty()) {
+        queries.push_back(current_query);
+    }
+    
+    return queries;
+}
+
+// Print beautiful header
+void print_header(bool use_colors = true, bool simple_mode = false) {
+    if (use_colors && !simple_mode) {
+        std::cout << "\n" << colors::BG_BLUE << colors::BOLD 
+                  << "                                                              " 
+                  << colors::RESET << "\n";
+        std::cout << colors::BG_BLUE << colors::BOLD 
+                  << "          DB25 SQL Parser - AST Viewer v1.0                  " 
+                  << colors::RESET << "\n";
+        std::cout << colors::BG_BLUE << colors::BOLD 
+                  << "                                                              " 
+                  << colors::RESET << "\n\n";
+    } else {
+        std::cout << "\n";
+        std::cout << "==============================================================\n";
+        std::cout << "          DB25 SQL Parser - AST Viewer v1.0\n";
+        std::cout << "==============================================================\n\n";
+    }
+}
+
+// Print usage information
+void print_usage(const char* program_name, bool use_colors = true, bool simple_mode = false) {
+    if (use_colors && !simple_mode) {
+        std::cout << colors::BOLD << "Usage:" << colors::RESET << "\n";
+        std::cout << "  " << colors::DIM << "# From pipe:" << colors::RESET << "\n";
+        std::cout << "  echo \"SELECT * FROM users\" | " << program_name << "\n\n";
+        
+        std::cout << "  " << colors::DIM << "# From file with index:" << colors::RESET << "\n";
+        std::cout << "  " << program_name << " --file queries.sqls --index 3\n\n";
+        
+        std::cout << "  " << colors::DIM << "# All queries from file:" << colors::RESET << "\n";
+        std::cout << "  " << program_name << " --file queries.sqls --all\n\n";
+        
+        std::cout << colors::BOLD << "Display Modes:" << colors::RESET << "\n";
+        std::cout << "  --color          " << colors::LITERAL_COLOR << "Enhanced color mode" << colors::RESET 
+                  << " with Unicode box drawing (default)\n";
+        std::cout << "  --simple         Simple mode with ASCII art and minimal info\n";
+        std::cout << "  --no-color       Disable all colors (implies simple mode)\n\n";
+        
+        std::cout << colors::BOLD << "Options:" << colors::RESET << "\n";
+        std::cout << "  --file <path>    Read SQL from .sqls file\n";
+        std::cout << "  --index <n>      Parse query at index n (1-based)\n";
+        std::cout << "  --all            Parse all queries in file\n";
+        std::cout << "  --stats          Show detailed statistics\n";
+        std::cout << "  --help           Show this help message\n\n";
+        
+        std::cout << colors::BOLD << "Color Legend:" << colors::RESET << "\n";
+        std::cout << "  " << colors::STMT_COLOR << "■" << colors::RESET << " Statements (SELECT, INSERT, etc.)\n";
+        std::cout << "  " << colors::CLAUSE_COLOR << "■" << colors::RESET << " Clauses (WHERE, FROM, etc.)\n";
+        std::cout << "  " << colors::EXPR_COLOR << "■" << colors::RESET << " Expressions\n";
+        std::cout << "  " << colors::REF_COLOR << "■" << colors::RESET << " References (tables, columns)\n";
+        std::cout << "  " << colors::LITERAL_COLOR << "■" << colors::RESET << " Literals (strings, numbers)\n";
+        std::cout << "  " << colors::FUNC_COLOR << "■" << colors::RESET << " Functions\n";
+        std::cout << "  " << colors::OPERATOR_COLOR << "■" << colors::RESET << " Operators\n\n";
+    } else {
+        std::cout << "Usage:\n";
+        std::cout << "  # From pipe:\n";
+        std::cout << "  echo \"SELECT * FROM users\" | " << program_name << "\n\n";
+        
+        std::cout << "  # From file with index:\n";
+        std::cout << "  " << program_name << " --file queries.sqls --index 3\n\n";
+        
+        std::cout << "  # All queries from file:\n";
+        std::cout << "  " << program_name << " --file queries.sqls --all\n\n";
+        
+        std::cout << "Display Modes:\n";
+        std::cout << "  --color          Enhanced color mode with Unicode box drawing (default)\n";
+        std::cout << "  --simple         Simple mode with ASCII art and minimal info\n";
+        std::cout << "  --no-color       Disable all colors (implies simple mode)\n\n";
+        
+        std::cout << "Options:\n";
+        std::cout << "  --file <path>    Read SQL from .sqls file\n";
+        std::cout << "  --index <n>      Parse query at index n (1-based)\n";
+        std::cout << "  --all            Parse all queries in file\n";
+        std::cout << "  --stats          Show detailed statistics\n";
+        std::cout << "  --help           Show this help message\n\n";
+    }
+}
+
+// Parse and display a single query
+void process_query(const std::string& sql, int index, bool use_colors, bool show_stats, bool simple_mode) {
+    if (index > 0) {
+        if (use_colors && !simple_mode) {
+            std::cout << colors::BG_PURPLE << colors::BOLD 
+                      << " Query #" << index << " " 
+                      << colors::RESET << "\n";
+        } else {
+            std::cout << "=== Query #" << index << " ===\n";
+        }
+    }
+    
+    if (use_colors && !simple_mode) {
+        std::cout << colors::DIM << "SQL: " << colors::RESET 
+                  << colors::ITALIC << sql << colors::RESET << "\n";
+    } else {
+        std::cout << "SQL: " << sql << "\n";
+    }
+    
+    // Parse the query
+    db25::parser::Parser parser;
+    auto start = std::chrono::high_resolution_clock::now();
+    auto result = parser.parse(sql);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    
+    if (result) {
+        auto* ast = *result;
+        int node_count = count_nodes(ast);
+        int tree_depth = calculate_depth(ast);
+        
+        // Show statistics
+        if (show_stats) {
+            if (use_colors && !simple_mode) {
+                std::cout << "\n" << colors::BG_GREEN << colors::BOLD 
+                          << " Parse Statistics " << colors::RESET << "\n";
+                std::cout << colors::DIM << "  Parse Time:  " << colors::RESET 
+                          << std::setw(8) << duration << " μs\n";
+                std::cout << colors::DIM << "  Node Count:  " << colors::RESET 
+                          << std::setw(8) << node_count << " nodes\n";
+                std::cout << colors::DIM << "  Tree Depth:  " << colors::RESET 
+                          << std::setw(8) << tree_depth << " levels\n";
+                std::cout << colors::DIM << "  Memory Used: " << colors::RESET 
+                          << std::setw(8) << (node_count * sizeof(db25::ast::ASTNode)) 
+                          << " bytes (approx)\n";
+            } else {
+                std::cout << "\nParse Statistics:\n";
+                std::cout << "  Parse Time:  " << std::setw(8) << duration << " us\n";
+                std::cout << "  Node Count:  " << std::setw(8) << node_count << " nodes\n";
+                std::cout << "  Tree Depth:  " << std::setw(8) << tree_depth << " levels\n";
+            }
+        }
+        
+        // Display AST
+        if (use_colors && !simple_mode) {
+            std::cout << "\n" << colors::BOLD << "Abstract Syntax Tree:" 
+                      << colors::RESET << "\n";
+        } else {
+            std::cout << "\nAbstract Syntax Tree:\n";
+        }
+        std::cout << std::string(50, '-') << "\n";
+        dump_tree(std::cout, ast, "", true, 0, use_colors, simple_mode);
+        std::cout << std::string(50, '-') << "\n";
+        
+    } else {
+        if (use_colors && !simple_mode) {
+            std::cout << "\n" << colors::STMT_COLOR << colors::BOLD 
+                      << "X Parse Error" << colors::RESET << "\n";
+        } else {
+            std::cout << "\n[ERROR] Parse Error\n";
+        }
+        std::cout << "  Line " << result.error().line 
+                  << ", Column " << result.error().column << ": "
+                  << result.error().message << "\n";
+    }
+    
+    std::cout << "\n";
+}
+
+} // anonymous namespace
+
+int main(int argc, char* argv[]) {
+    // Parse command line arguments
+    std::string filename;
+    int query_index = -1;
+    bool parse_all = false;
+    bool use_colors = true;
+    bool show_stats = false;
+    bool show_help = false;
+    bool simple_mode = false;
+    
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        
+        if (arg == "--file" && i + 1 < argc) {
+            filename = argv[++i];
+        } else if (arg == "--index" && i + 1 < argc) {
+            query_index = std::stoi(argv[++i]);
+        } else if (arg == "--all") {
+            parse_all = true;
+        } else if (arg == "--color") {
+            use_colors = true;
+            simple_mode = false;
+        } else if (arg == "--simple") {
+            simple_mode = true;
+        } else if (arg == "--no-color") {
+            use_colors = false;
+            simple_mode = true;
+        } else if (arg == "--stats") {
+            show_stats = true;
+        } else if (arg == "--help" || arg == "-h") {
+            show_help = true;
+        }
+    }
+    
+    // Disable colors if output is not a terminal
+    if (!isatty(STDOUT_FILENO)) {
+        use_colors = false;
+        simple_mode = true;
+    }
+    
+    print_header(use_colors, simple_mode);
+    
+    if (show_help) {
+        print_usage(argv[0], use_colors, simple_mode);
+        return 0;
+    }
+    
+    // Read input
+    std::vector<std::string> queries;
+    
+    if (!filename.empty()) {
+        // Read from file
+        queries = read_sqls_file(filename);
+        
+        if (queries.empty()) {
+            std::cerr << colors::STMT_COLOR << "Error: " << colors::RESET 
+                      << "Could not read file '" << filename << "'\n";
+            return 1;
+        }
+        
+        std::cout << colors::DIM << "Loaded " << queries.size() 
+                  << " queries from " << filename << colors::RESET << "\n\n";
+        
+        if (parse_all) {
+            // Parse all queries
+            for (size_t i = 0; i < queries.size(); i++) {
+                process_query(queries[i], i + 1, use_colors, show_stats, simple_mode);
+            }
+        } else if (query_index > 0 && query_index <= static_cast<int>(queries.size())) {
+            // Parse specific query
+            process_query(queries[query_index - 1], query_index, use_colors, show_stats, simple_mode);
+        } else {
+            std::cerr << colors::STMT_COLOR << "Error: " << colors::RESET 
+                      << "Invalid index. File contains " << queries.size() 
+                      << " queries (use 1-" << queries.size() << ")\n";
+            return 1;
+        }
+    } else {
+        // Read from stdin
+        std::string sql;
+        std::string line;
+        
+        while (std::getline(std::cin, line)) {
+            if (!sql.empty()) sql += " ";
+            sql += line;
+        }
+        
+        if (sql.empty()) {
+            print_usage(argv[0], use_colors, simple_mode);
+            return 1;
+        }
+        
+        process_query(sql, 0, use_colors, show_stats, simple_mode);
+    }
+    
+    return 0;
+}

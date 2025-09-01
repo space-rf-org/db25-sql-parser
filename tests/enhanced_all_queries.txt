@@ -1,0 +1,1198 @@
+
+==============================================================
+          DB25 SQL Parser - Enhanced AST Viewer v2.0
+==============================================================
+
+Loaded 39 queries from tests/showcase_queries.sqls
+
+=== Query #1 ===
+SQL: SELECT * FROM users
+
+Parse Statistics:
+  Parse Time:          9 us
+  Node Count:          5 nodes
+  Tree Depth:          3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=1}
+  │   └─* {id=2}
+  └─FROM {id=5, children=1}
+      └─TABLE {val=users, id=4}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #2 ===
+SQL: SELECT id, name, email FROM customers
+
+Parse Statistics:
+  Parse Time:          5 us
+  Node Count:          7 nodes
+  Tree Depth:          3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=3}
+  │   ├─COLUMN {val=id, id=2}
+  │   ├─COLUMN {val=name, id=4}
+  │   └─COLUMN {val=email, id=5}
+  └─FROM {id=7, children=1}
+      └─TABLE {val=customers, id=6}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #3 ===
+SQL: SELECT * FROM products WHERE price > 100 AND stock > 0
+
+Parse Statistics:
+  Parse Time:          2 us
+  Node Count:         13 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=3}
+  ├─SELECT LIST {id=3, children=1}
+  │   └─* {id=2}
+  ├─FROM {id=5, children=1}
+  │   └─TABLE {val=products, id=4}
+  └─WHERE {id=13, children=1}
+      └─BINARY {op=AND, id=12, children=2}
+          ├─BINARY {op=>, id=8, children=2}
+          │   ├─COLUMN {val=price, id=6}
+          │   └─INT {val=100, id=7}
+          └─BINARY {op=>, id=11, children=2}
+              ├─COLUMN {val=stock, id=9}
+              └─INT {val=0, id=10}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #4 ===
+SQL: SELECT name, score FROM students ORDER BY score DESC LIMIT 10
+
+Parse Statistics:
+  Parse Time:          2 us
+  Node Count:         10 nodes
+  Tree Depth:          3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=4}
+  ├─SELECT LIST {id=3, children=2}
+  │   ├─COLUMN {val=name, id=2}
+  │   └─COLUMN {val=score, id=4}
+  ├─FROM {id=6, children=1}
+  │   └─TABLE {val=students, id=5}
+  ├─ORDER BY {id=8, children=1}
+  │   └─COLUMN {val=score, id=7}
+  └─LIMIT {id=9, children=1}
+      └─INT {val=10, id=10}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #5 ===
+SQL: SELECT u.name, o.total  FROM users u  INNER JOIN orders o ON u.id = o.user_id
+
+Parse Statistics:
+  Parse Time:          4 us
+  Node Count:         11 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=2}
+  │   ├─COLUMN {val=u.name, id=2}
+  │   └─COLUMN {val=o.total, id=4}
+  └─FROM {id=6, children=2}
+      ├─TABLE {val=users, schema=u, id=5}
+      └─JOIN {type=INNER JOIN, id=7, children=2}
+          ├─TABLE {val=orders, schema=o, id=8}
+          └─BINARY {op==, id=11, children=2}
+              ├─COLUMN {val=u.id, id=9}
+              └─COLUMN {val=o.user_id, id=10}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #6 ===
+SQL: SELECT c.name, o.order_date, p.product_name, oi.quantity FROM customers c JOIN orders o ON c.id = o.customer_id JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.order_date >= '2024-01-01'
+
+Parse Statistics:
+  Parse Time:          6 us
+  Node Count:         27 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=3}
+  ├─SELECT LIST {id=3, children=4}
+  │   ├─COLUMN {val=c.name, id=2}
+  │   ├─COLUMN {val=o.order_date, id=4}
+  │   ├─COLUMN {val=p.product_name, id=5}
+  │   └─COLUMN {val=oi.quantity, id=6}
+  ├─FROM {id=8, children=4}
+  │   ├─TABLE {val=customers, schema=c, id=7}
+  │   ├─JOIN {type=JOIN, id=9, children=2}
+  │   │   ├─TABLE {val=orders, schema=o, id=10}
+  │   │   └─BINARY {op==, id=13, children=2}
+  │   │       ├─COLUMN {val=c.id, id=11}
+  │   │       └─COLUMN {val=o.customer_id, id=12}
+  │   ├─JOIN {type=JOIN, id=14, children=2}
+  │   │   ├─TABLE {val=order_items, schema=oi, id=15}
+  │   │   └─BINARY {op==, id=18, children=2}
+  │   │       ├─COLUMN {val=o.id, id=16}
+  │   │       └─COLUMN {val=oi.order_id, id=17}
+  │   └─JOIN {type=JOIN, id=19, children=2}
+  │       ├─TABLE {val=products, schema=p, id=20}
+  │       └─BINARY {op==, id=23, children=2}
+  │           ├─COLUMN {val=oi.product_id, id=21}
+  │           └─COLUMN {val=p.id, id=22}
+  └─WHERE {id=27, children=1}
+      └─BINARY {op=>=, id=26, children=2}
+          ├─COLUMN {val=o.order_date, id=24}
+          └─STRING {''2024-01-01'', id=25}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #7 ===
+SQL: SELECT d.name, COUNT(e.id) as emp_count FROM departments d LEFT JOIN employees e ON d.id = e.dept_id GROUP BY d.id, d.name HAVING COUNT(e.id) > 5
+
+Parse Statistics:
+  Parse Time:          5 us
+  Node Count:         20 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=4}
+  ├─SELECT LIST {id=3, children=2}
+  │   ├─COLUMN {val=d.name, id=2}
+  │   └─FUNCTION {val=COUNT, schema=emp_count, id=4, children=1}
+  │       └─COLUMN {val=e.id, id=5}
+  ├─FROM {id=7, children=2}
+  │   ├─TABLE {val=departments, schema=d, id=6}
+  │   └─JOIN {type=LEFT JOIN, id=8, children=2}
+  │       ├─TABLE {val=employees, schema=e, id=9}
+  │       └─BINARY {op==, id=12, children=2}
+  │           ├─COLUMN {val=d.id, id=10}
+  │           └─COLUMN {val=e.dept_id, id=11}
+  ├─GROUP BY {id=13, children=2}
+  │   ├─COLUMN {val=d.id, id=14}
+  │   └─COLUMN {val=d.name, id=15}
+  └─HAVING {id=20, children=1}
+      └─BINARY {op=>, id=19, children=2}
+          ├─FUNCTION {val=COUNT, id=16, children=1}
+          │   └─COLUMN {val=e.id, id=17}
+          └─INT {val=5, id=18}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #8 ===
+SQL: SELECT COUNT(*) as total, AVG(price) as avg_price FROM products
+
+Parse Statistics:
+  Parse Time:          4 us
+  Node Count:          8 nodes
+  Tree Depth:          4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=4, children=2}
+  │   ├─FUNCTION {val=COUNT, schema=total, id=2, children=1}
+  │   │   └─* {id=3}
+  │   └─FUNCTION {val=AVG, schema=avg_price, id=5, children=1}
+  │       └─IDENTIFIER {val=price, id=6}
+  └─FROM {id=8, children=1}
+      └─TABLE {val=products, id=7}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #9 ===
+SQL: SELECT category, COUNT(*) as count, MAX(price) as max_price FROM products GROUP BY category HAVING COUNT(*) > 10
+
+Parse Statistics:
+  Parse Time:          2 us
+  Node Count:         16 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=4}
+  ├─SELECT LIST {id=3, children=3}
+  │   ├─COLUMN {val=category, id=2}
+  │   ├─FUNCTION {val=COUNT, schema=count, id=4, children=1}
+  │   │   └─* {id=5}
+  │   └─FUNCTION {val=MAX, schema=max_price, id=6, children=1}
+  │       └─IDENTIFIER {val=price, id=7}
+  ├─FROM {id=9, children=1}
+  │   └─TABLE {val=products, id=8}
+  ├─GROUP BY {id=10, children=1}
+  │   └─COLUMN {val=category, id=11}
+  └─HAVING {id=16, children=1}
+      └─BINARY {op=>, id=15, children=2}
+          ├─FUNCTION {val=COUNT, id=12, children=1}
+          │   └─* {id=13}
+          └─INT {val=10, id=14}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #10 ===
+SQL: SELECT dept, job_title, COUNT(*) as count FROM employees GROUP BY GROUPING SETS ((dept), (job_title), (dept, job_title), ())
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         18 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=3}
+  ├─SELECT LIST {id=3, children=3}
+  │   ├─COLUMN {val=dept, id=2}
+  │   ├─COLUMN {val=job_title, id=4}
+  │   └─FUNCTION {val=COUNT, schema=count, id=5, children=1}
+  │       └─* {id=6}
+  ├─FROM {id=8, children=1}
+  │   └─TABLE {val=employees, id=7}
+  └─GROUP BY {id=9, children=1}
+      └─NODE_70 {val=GROUPING_SETS, id=10, children=4}
+          ├─NODE_96 {id=11, children=1}
+          │   └─COLUMN {val=dept, id=12}
+          ├─NODE_96 {id=13, children=1}
+          │   └─COLUMN {val=job_title, id=14}
+          ├─NODE_96 {id=15, children=2}
+          │   ├─COLUMN {val=dept, id=16}
+          │   └─COLUMN {val=job_title, id=17}
+          └─NODE_96 {id=18}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #11 ===
+SQL: SELECT      name,     department,     salary,     RANK() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rank FROM employees
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         13 nodes
+  Tree Depth:          6 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=4}
+  │   ├─COLUMN {val=name, id=2}
+  │   ├─COLUMN {val=department, id=4}
+  │   ├─COLUMN {val=salary, id=5}
+  │   └─FUNCTION {val=RANK, schema=dept_rank, id=6, children=1}
+  │       └─WINDOW {id=7, children=2}
+  │           ├─NODE_100 {id=8, children=1}
+  │           │   └─COLUMN {val=department, id=9}
+  │           └─ORDER BY {id=11, children=1}
+  │               └─COLUMN {val=salary, id=10}
+  └─FROM {id=13, children=1}
+      └─TABLE {val=employees, id=12}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #12 ===
+SQL: SELECT      order_date,     amount,     SUM(amount) OVER (ORDER BY order_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_total FROM orders
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         14 nodes
+  Tree Depth:          6 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=3}
+  │   ├─COLUMN {val=order_date, id=2}
+  │   ├─COLUMN {val=amount, id=4}
+  │   └─FUNCTION {val=SUM, schema=running_total, id=5, children=2}
+  │       ├─IDENTIFIER {val=amount, id=6}
+  │       └─WINDOW {id=7, children=2}
+  │           ├─ORDER BY {id=9, children=1}
+  │           │   └─COLUMN {val=order_date, id=8}
+  │           └─NODE_102 {val=ROWS, id=10, children=2}
+  │               ├─NODE_103 {val=UNBOUNDED, schema=PRECEDING, id=11}
+  │               └─NODE_103 {val=CURRENT ROW, id=12}
+  └─FROM {id=14, children=1}
+      └─TABLE {val=orders, id=13}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #13 ===
+SQL: SELECT      name,     score,     RANK() OVER (ORDER BY score DESC) as rank,     DENSE_RANK() OVER (ORDER BY score DESC) as dense_rank,     NTILE(4) OVER (ORDER BY score DESC) as quartile FROM students
+
+Parse Statistics:
+  Parse Time:          4 us
+  Node Count:         19 nodes
+  Tree Depth:          6 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=5}
+  │   ├─COLUMN {val=name, id=2}
+  │   ├─COLUMN {val=score, id=4}
+  │   ├─FUNCTION {val=RANK, schema=rank, id=5, children=1}
+  │   │   └─WINDOW {id=6, children=1}
+  │   │       └─ORDER BY {id=8, children=1}
+  │   │           └─COLUMN {val=score, id=7}
+  │   ├─FUNCTION {val=DENSE_RANK, schema=dense_rank, id=9, children=1}
+  │   │   └─WINDOW {id=10, children=1}
+  │   │       └─ORDER BY {id=12, children=1}
+  │   │           └─COLUMN {val=score, id=11}
+  │   └─FUNCTION {val=NTILE, schema=quartile, id=13, children=2}
+  │       ├─INT {val=4, id=14}
+  │       └─WINDOW {id=15, children=1}
+  │           └─ORDER BY {id=17, children=1}
+  │               └─COLUMN {val=score, id=16}
+  └─FROM {id=19, children=1}
+      └─TABLE {val=students, id=18}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #14 ===
+SQL: WITH high_value_customers AS (     SELECT customer_id, SUM(total) as total_spent     FROM orders     GROUP BY customer_id     HAVING SUM(total) > 10000 ) SELECT c.name, h.total_spent FROM customers c JOIN high_value_customers h ON c.id = h.customer_id
+
+Parse Statistics:
+  Parse Time:          5 us
+  Node Count:         27 nodes
+  Tree Depth:          8 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=17, children=3}
+  ├─NODE_94 {id=1, children=1}
+  │   └─CTE {val=high_value_customers, id=2, children=1}
+  │       └─SELECT {id=3, children=4}
+  │           ├─SELECT LIST {id=5, children=2}
+  │           │   ├─COLUMN {val=customer_id, id=4}
+  │           │   └─FUNCTION {val=SUM, schema=total_spent, id=6, children=1}
+  │           │       └─IDENTIFIER {val=total, id=7}
+  │           ├─FROM {id=9, children=1}
+  │           │   └─TABLE {val=orders, id=8}
+  │           ├─GROUP BY {id=10, children=1}
+  │           │   └─COLUMN {val=customer_id, id=11}
+  │           └─HAVING {id=16, children=1}
+  │               └─BINARY {op=>, id=15, children=2}
+  │                   ├─FUNCTION {val=SUM, id=12, children=1}
+  │                   │   └─IDENTIFIER {val=total, id=13}
+  │                   └─INT {val=10000, id=14}
+  ├─SELECT LIST {id=19, children=2}
+  │   ├─COLUMN {val=c.name, id=18}
+  │   └─COLUMN {val=h.total_spent, id=20}
+  └─FROM {id=22, children=2}
+      ├─TABLE {val=customers, schema=c, id=21}
+      └─JOIN {type=JOIN, id=23, children=2}
+          ├─TABLE {val=high_value_customers, schema=h, id=24}
+          └─BINARY {op==, id=27, children=2}
+              ├─COLUMN {val=c.id, id=25}
+              └─COLUMN {val=h.customer_id, id=26}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #15 ===
+SQL: WITH RECURSIVE employee_hierarchy AS (     SELECT id, name, manager_id, 0 as level     FROM employees     WHERE manager_id IS NULL     UNION ALL     SELECT e.id, e.name, e.manager_id, h.level + 1     FROM employees e     JOIN employee_hierarchy h ON e.manager_id = h.id ) SELECT * FROM employee_hierarchy ORDER BY level, name
+
+Parse Statistics:
+  Parse Time:          6 us
+  Node Count:         37 nodes
+  Tree Depth:          9 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=30, children=4}
+  ├─NODE_94 {id=1, children=1}
+  │   └─CTE {val=employee_hierarchy, id=2, children=1}
+  │       └─UNION {val=UNION, id=14, flags=ALL, children=2}
+  │           ├─SELECT {id=3, children=3}
+  │           │   ├─SELECT LIST {id=5, children=4}
+  │           │   │   ├─COLUMN {val=id, id=4}
+  │           │   │   ├─COLUMN {val=name, id=6}
+  │           │   │   ├─COLUMN {val=manager_id, id=7}
+  │           │   │   └─INT {val=0, schema=level, id=8}
+  │           │   ├─FROM {id=10, children=1}
+  │           │   │   └─TABLE {val=employees, id=9}
+  │           │   └─WHERE {id=13, children=1}
+  │           │       └─IS NULL {val=IS NULL, id=12, children=1}
+  │           │           └─COLUMN {val=manager_id, id=11}
+  │           └─SELECT {id=15, children=2}
+  │               ├─SELECT LIST {id=17, children=4}
+  │               │   ├─COLUMN {val=e.id, id=16}
+  │               │   ├─COLUMN {val=e.name, id=18}
+  │               │   ├─COLUMN {val=e.manager_id, id=19}
+  │               │   └─BINARY {op=+, id=22, children=2}
+  │               │       ├─COLUMN {val=h.level, id=20}
+  │               │       └─INT {val=1, id=21}
+  │               └─FROM {id=24, children=2}
+  │                   ├─TABLE {val=employees, schema=e, id=23}
+  │                   └─JOIN {type=JOIN, id=25, children=2}
+  │                       ├─TABLE {val=employee_hierarchy, schema=h, id=26}
+  │                       └─BINARY {op==, id=29, children=2}
+  │                           ├─COLUMN {val=e.manager_id, id=27}
+  │                           └─COLUMN {val=h.id, id=28}
+  ├─SELECT LIST {id=32, children=1}
+  │   └─* {id=31}
+  ├─FROM {id=34, children=1}
+  │   └─TABLE {val=employee_hierarchy, id=33}
+  └─ORDER BY {id=36, children=2}
+      ├─COLUMN {val=level, id=35}
+      └─COLUMN {val=name, id=37}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #16 ===
+SQL: WITH  sales_by_month AS (     SELECT          DATE_TRUNC('month', order_date) as month,         SUM(total) as monthly_total     FROM orders     GROUP BY DATE_TRUNC('month', order_date) ), avg_sales AS (     SELECT AVG(monthly_total) as avg_monthly     FROM sales_by_month ) SELECT      s.month,     s.monthly_total,     a.avg_monthly,     s.monthly_total - a.avg_monthly as variance FROM sales_by_month s CROSS JOIN avg_sales a
+
+Parse Statistics:
+  Parse Time:          6 us
+  Node Count:         34 nodes
+  Tree Depth:          7 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=23, children=3}
+  ├─NODE_94 {id=1, children=2}
+  │   ├─CTE {val=sales_by_month, id=2, children=1}
+  │   │   └─SELECT {id=3, children=3}
+  │   │       ├─SELECT LIST {id=7, children=2}
+  │   │       │   ├─FUNCTION {val=DATE_TRUNC, schema=month, id=4, children=2}
+  │   │       │   │   ├─STRING {''month'', id=5}
+  │   │       │   │   └─IDENTIFIER {val=order_date, id=6}
+  │   │       │   └─FUNCTION {val=SUM, schema=monthly_total, id=8, children=1}
+  │   │       │       └─IDENTIFIER {val=total, id=9}
+  │   │       ├─FROM {id=11, children=1}
+  │   │       │   └─TABLE {val=orders, id=10}
+  │   │       └─GROUP BY {id=12, children=1}
+  │   │           └─FUNCTION {val=DATE_TRUNC, id=13, children=2}
+  │   │               ├─STRING {''month'', id=14}
+  │   │               └─IDENTIFIER {val=order_date, id=15}
+  │   └─CTE {val=avg_sales, id=16, children=1}
+  │       └─SELECT {id=17, children=2}
+  │           ├─SELECT LIST {id=20, children=1}
+  │           │   └─FUNCTION {val=AVG, schema=avg_monthly, id=18, children=1}
+  │           │       └─IDENTIFIER {val=monthly_total, id=19}
+  │           └─FROM {id=22, children=1}
+  │               └─TABLE {val=sales_by_month, id=21}
+  ├─SELECT LIST {id=25, children=4}
+  │   ├─COLUMN {val=s.month, id=24}
+  │   ├─COLUMN {val=s.monthly_total, id=26}
+  │   ├─COLUMN {val=a.avg_monthly, id=27}
+  │   └─BINARY {op=-, schema=variance, id=30, children=2}
+  │       ├─COLUMN {val=s.monthly_total, id=28}
+  │       └─COLUMN {val=a.avg_monthly, id=29}
+  └─FROM {id=32, children=2}
+      ├─TABLE {val=sales_by_month, schema=s, id=31}
+      └─JOIN {type=CROSS JOIN, id=33, children=1}
+          └─TABLE {val=avg_sales, schema=a, id=34}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #17 ===
+SQL: SELECT      name,     salary,     (SELECT AVG(salary) FROM employees) as avg_salary FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         23 nodes
+  Tree Depth:          8 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=3}
+  ├─SELECT LIST {id=3, children=3}
+  │   ├─COLUMN {val=name, id=2}
+  │   ├─COLUMN {val=salary, id=4}
+  │   └─NODE_93 {schema=avg_salary, id=5, children=1}
+  │       └─SELECT {id=6, children=2}
+  │           ├─SELECT LIST {id=9, children=1}
+  │           │   └─FUNCTION {val=AVG, id=7, children=1}
+  │           │       └─IDENTIFIER {val=salary, id=8}
+  │           └─FROM {id=11, children=1}
+  │               └─TABLE {val=employees, id=10}
+  ├─FROM {id=13, children=1}
+  │   └─TABLE {val=employees, id=12}
+  └─WHERE {id=23, children=1}
+      └─BINARY {op=>, id=22, children=2}
+          ├─COLUMN {val=salary, id=14}
+          └─NODE_93 {id=15, children=1}
+              └─SELECT {id=16, children=2}
+                  ├─SELECT LIST {id=19, children=1}
+                  │   └─FUNCTION {val=AVG, id=17, children=1}
+                  │       └─IDENTIFIER {val=salary, id=18}
+                  └─FROM {id=21, children=1}
+                      └─TABLE {val=employees, id=20}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #18 ===
+SQL: SELECT * FROM products WHERE category_id IN (     SELECT id FROM categories WHERE name LIKE '%Electronics%' )
+
+Parse Statistics:
+  Parse Time:          2 us
+  Node Count:         18 nodes
+  Tree Depth:          8 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=3}
+  ├─SELECT LIST {id=3, children=1}
+  │   └─* {id=2}
+  ├─FROM {id=5, children=1}
+  │   └─TABLE {val=products, id=4}
+  └─WHERE {id=18, children=1}
+      └─IN {val=IN, id=17, children=2}
+          ├─COLUMN {val=category_id, id=6}
+          └─NODE_93 {id=7, children=1}
+              └─SELECT {id=8, children=3}
+                  ├─SELECT LIST {id=10, children=1}
+                  │   └─COLUMN {val=id, id=9}
+                  ├─FROM {id=12, children=1}
+                  │   └─TABLE {val=categories, id=11}
+                  └─WHERE {id=16, children=1}
+                      └─LIKE {val=LIKE, id=15, children=2}
+                          ├─COLUMN {val=name, id=13}
+                          └─STRING {''%Electronics%'', id=14}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #19 ===
+SQL: SELECT c.* FROM customers c WHERE EXISTS (     SELECT 1 FROM orders o     WHERE o.customer_id = c.id     AND o.order_date >= CURRENT_DATE - INTERVAL '30 days' )
+
+Parse Statistics:
+  Parse Time:          2 us
+  Node Count:          5 nodes
+  Tree Depth:          4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=1}
+  └─SELECT LIST {id=5, children=1}
+      └─BINARY {op=*, schema=customers, id=4, children=2}
+          ├─COLUMN {val=c, id=2}
+          └─COLUMN {val=FROM, id=3}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #20 ===
+SQL: SELECT      e1.name,     e1.salary,     (SELECT COUNT(*) FROM employees e2       WHERE e2.department = e1.department       AND e2.salary > e1.salary) as higher_paid_in_dept FROM employees e1
+
+Parse Statistics:
+  Parse Time:          4 us
+  Node Count:         21 nodes
+  Tree Depth:          8 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=3}
+  │   ├─COLUMN {val=e1.name, id=2}
+  │   ├─COLUMN {val=e1.salary, id=4}
+  │   └─NODE_93 {schema=higher_paid_in_dept, id=5, children=1}
+  │       └─SELECT {id=6, children=3}
+  │           ├─SELECT LIST {id=9, children=1}
+  │           │   └─FUNCTION {val=COUNT, id=7, children=1}
+  │           │       └─* {id=8}
+  │           ├─FROM {id=11, children=1}
+  │           │   └─TABLE {val=employees, schema=e2, id=10}
+  │           └─WHERE {id=19, children=1}
+  │               └─BINARY {op=AND, id=18, children=2}
+  │                   ├─BINARY {op==, id=14, children=2}
+  │                   │   ├─COLUMN {val=e2.department, id=12}
+  │                   │   └─COLUMN {val=e1.department, id=13}
+  │                   └─BINARY {op=>, id=17, children=2}
+  │                       ├─COLUMN {val=e2.salary, id=15}
+  │                       └─COLUMN {val=e1.salary, id=16}
+  └─FROM {id=21, children=1}
+      └─TABLE {val=employees, schema=e1, id=20}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #21 ===
+SQL: SELECT      name,     CASE status         WHEN 'active' THEN 'Active User'         WHEN 'inactive' THEN 'Inactive User'         WHEN 'suspended' THEN 'Account Suspended'         ELSE 'Unknown Status'     END as status_label FROM users
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         17 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=2}
+  │   ├─COLUMN {val=name, id=2}
+  │   └─CASE {schema=status_label, id=4, children=5}
+  │       ├─IDENTIFIER {val=status, id=5}
+  │       ├─BINARY {op=WHEN, id=6, children=2}
+  │       │   ├─STRING {''active'', id=7}
+  │       │   └─STRING {''Active User'', id=8}
+  │       ├─BINARY {op=WHEN, id=9, children=2}
+  │       │   ├─STRING {''inactive'', id=10}
+  │       │   └─STRING {''Inactive User'', id=11}
+  │       ├─BINARY {op=WHEN, id=12, children=2}
+  │       │   ├─STRING {''suspended'', id=13}
+  │       │   └─STRING {''Account Suspended'', id=14}
+  │       └─STRING {''Unknown Status'', id=15}
+  └─FROM {id=17, children=1}
+      └─TABLE {val=users, id=16}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #22 ===
+SQL: SELECT      product_name,     price,     CASE          WHEN price < 10 THEN 'Budget'         WHEN price BETWEEN 10 AND 50 THEN 'Standard'         WHEN price BETWEEN 50 AND 100 THEN 'Premium'         WHEN price > 100 THEN 'Luxury'         ELSE 'Unpriced'     END as price_category FROM products
+
+Parse Statistics:
+  Parse Time:          4 us
+  Node Count:         30 nodes
+  Tree Depth:          6 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=3}
+  │   ├─COLUMN {val=product_name, id=2}
+  │   ├─COLUMN {val=price, id=4}
+  │   └─CASE {schema=price_category, id=5, children=5}
+  │       ├─BINARY {op=WHEN, id=6, children=2}
+  │       │   ├─BINARY {op=<, id=9, children=2}
+  │       │   │   ├─IDENTIFIER {val=price, id=7}
+  │       │   │   └─INT {val=10, id=8}
+  │       │   └─STRING {''Budget'', id=10}
+  │       ├─BINARY {op=WHEN, id=11, children=2}
+  │       │   ├─BETWEEN {val=BETWEEN, id=15, children=3}
+  │       │   │   ├─IDENTIFIER {val=price, id=12}
+  │       │   │   ├─INT {val=10, id=13}
+  │       │   │   └─INT {val=50, id=14}
+  │       │   └─STRING {''Standard'', id=16}
+  │       ├─BINARY {op=WHEN, id=17, children=2}
+  │       │   ├─BETWEEN {val=BETWEEN, id=21, children=3}
+  │       │   │   ├─IDENTIFIER {val=price, id=18}
+  │       │   │   ├─INT {val=50, id=19}
+  │       │   │   └─INT {val=100, id=20}
+  │       │   └─STRING {''Premium'', id=22}
+  │       ├─BINARY {op=WHEN, id=23, children=2}
+  │       │   ├─BINARY {op=>, id=26, children=2}
+  │       │   │   ├─IDENTIFIER {val=price, id=24}
+  │       │   │   └─INT {val=100, id=25}
+  │       │   └─STRING {''Luxury'', id=27}
+  │       └─STRING {''Unpriced'', id=28}
+  └─FROM {id=30, children=1}
+      └─TABLE {val=products, id=29}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #23 ===
+SQL: INSERT INTO users (name, email, created_at)  VALUES ('John Doe', 'john@example.com', NOW())
+
+Parse Statistics:
+  Parse Time:          2 us
+  Node Count:          2 nodes
+  Tree Depth:          2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+INSERT {id=1, children=1}
+  └─TABLE {val=users, id=2}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #24 ===
+SQL: INSERT INTO archived_orders  SELECT * FROM orders  WHERE order_date < '2023-01-01'
+
+Parse Statistics:
+  Parse Time:          1 us
+  Node Count:         11 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+INSERT {id=1, children=2}
+  ├─TABLE {val=archived_orders, id=2}
+  └─SELECT {id=3, children=3}
+      ├─SELECT LIST {id=5, children=1}
+      │   └─* {id=4}
+      ├─FROM {id=7, children=1}
+      │   └─TABLE {val=orders, id=6}
+      └─WHERE {id=11, children=1}
+          └─BINARY {op=<, id=10, children=2}
+              ├─COLUMN {val=order_date, id=8}
+              └─STRING {''2023-01-01'', id=9}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #25 ===
+SQL: UPDATE products  SET price = price * 1.1,      updated_at = NOW()  WHERE category = 'Electronics' AND stock > 0
+
+Parse Statistics:
+  Parse Time:          2 us
+  Node Count:         11 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+UPDATE {id=1, children=3}
+  ├─TABLE {val=products, id=2}
+  ├─SET {id=3, children=2}
+  │   ├─BINARY {op=price, id=4, children=1}
+  │   │   └─BINARY {op=*, id=7, children=2}
+  │   │       ├─IDENTIFIER {val=price, id=5}
+  │   │       └─INT {val=1.1, id=6}
+  │   └─BINARY {op=updated_at, id=8, children=1}
+  │       └─FUNCTION {val=NOW, id=9}
+  └─WHERE {id=11, children=1}
+      └─COLUMN {val=WHERE, id=10}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #26 ===
+SQL: DELETE FROM sessions  WHERE last_activity < CURRENT_TIMESTAMP - INTERVAL '24 hours'
+
+Parse Statistics:
+  Parse Time:          1 us
+  Node Count:          4 nodes
+  Tree Depth:          3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+DELETE {id=1, children=2}
+  ├─TABLE {val=sessions, id=2}
+  └─WHERE {id=4, children=1}
+      └─COLUMN {val=WHERE, id=3}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #27 ===
+SQL: CREATE TABLE customers (     id SERIAL PRIMARY KEY,     name VARCHAR(100) NOT NULL,     email VARCHAR(255) UNIQUE NOT NULL,     phone VARCHAR(20),     address TEXT,     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP )
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:          1 nodes
+  Tree Depth:          1 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+CREATE TABLE {val=customers, id=1}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #28 ===
+SQL: CREATE TABLE orders (     id BIGSERIAL PRIMARY KEY,     customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,     order_date DATE NOT NULL DEFAULT CURRENT_DATE,     total DECIMAL(10, 2) NOT NULL CHECK (total >= 0),     status VARCHAR(20) DEFAULT 'pending',     CONSTRAINT valid_status CHECK (status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled')) )
+
+Parse Statistics:
+  Parse Time:          4 us
+  Node Count:          1 nodes
+  Tree Depth:          1 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+CREATE TABLE {val=orders, id=1}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #29 ===
+SQL: CREATE INDEX idx_orders_customer_date  ON orders(customer_id, order_date DESC)
+
+Parse Statistics:
+  Parse Time:          1 us
+  Node Count:          1 nodes
+  Tree Depth:          1 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+CREATE INDEX {val=idx_orders_customer_date, schema=orders, id=1}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #30 ===
+SQL: CREATE VIEW active_customers AS SELECT c.*, COUNT(o.id) as order_count FROM customers c LEFT JOIN orders o ON c.id = o.customer_id WHERE c.created_at >= CURRENT_DATE - INTERVAL '1 year' GROUP BY c.id
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         19 nodes
+  Tree Depth:          6 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+CREATE VIEW {val=active_customers, id=1, children=1}
+  └─SELECT {id=2, children=3}
+      ├─SELECT LIST {id=4, children=2}
+      │   ├─COLUMN {val=c, id=3}
+      │   └─FUNCTION {val=COUNT, schema=order_count, id=5, children=1}
+      │       └─COLUMN {val=o.id, id=6}
+      ├─FROM {id=8, children=2}
+      │   ├─TABLE {val=customers, schema=c, id=7}
+      │   └─JOIN {type=LEFT JOIN, id=9, children=2}
+      │       ├─TABLE {val=orders, schema=o, id=10}
+      │       └─BINARY {op==, id=13, children=2}
+      │           ├─COLUMN {val=c.id, id=11}
+      │           └─COLUMN {val=o.customer_id, id=12}
+      └─WHERE {id=19, children=1}
+          └─BINARY {op=>=, id=18, children=2}
+              ├─COLUMN {val=c.created_at, id=14}
+              └─BINARY {op=-, id=17, children=2}
+                  ├─COLUMN {val=CURRENT_DATE, id=15}
+                  └─COLUMN {val=INTERVAL, id=16}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #31 ===
+SQL: ALTER TABLE products  ADD COLUMN discount_percentage DECIMAL(5, 2) DEFAULT 0 CHECK (discount_percentage >= 0 AND discount_percentage <= 100)
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         14 nodes
+  Tree Depth:          7 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+ALTER TABLE {val=products, id=1, children=1}
+  └─NODE_43 {val=ADD, id=2, children=1}
+      └─COLUMN_DEF {val=discount_percentage, id=3, children=3}
+          ├─DATA_TYPE {val=DECIMAL, id=4, dtype=6}
+          ├─NODE_37 {id=5, children=1}
+          │   └─INT {val=0, id=6}
+          └─NODE_38 {id=7, children=1}
+              └─BINARY {op=AND, id=14, children=2}
+                  ├─BINARY {op=>=, id=10, children=2}
+                  │   ├─IDENTIFIER {val=discount_percentage, id=8}
+                  │   └─INT {val=0, id=9}
+                  └─BINARY {op=<=, id=13, children=2}
+                      ├─IDENTIFIER {val=discount_percentage, id=11}
+                      └─INT {val=100, id=12}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #32 ===
+SQL: SELECT      UPPER(first_name) || ' ' || LOWER(last_name) as formatted_name,     SUBSTRING(email FROM 1 FOR POSITION('@' IN email) - 1) as username,     LENGTH(bio) as bio_length FROM users WHERE email LIKE '%@example.com'
+
+[ERROR] Parse Error
+  Line 1, Column 102: Unclosed parenthesis
+
+------------------------------------------------------------
+
+=== Query #33 ===
+SQL: SELECT      DATE_TRUNC('month', created_at) as month,     EXTRACT(YEAR FROM created_at) as year,     AGE(NOW(), created_at) as account_age,     created_at + INTERVAL '30 days' as trial_end FROM users WHERE created_at >= '2024-01-01'::DATE
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         14 nodes
+  Tree Depth:          4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=1}
+  └─SELECT LIST {id=5, children=4}
+      ├─FUNCTION {val=DATE_TRUNC, schema=month, id=2, children=2}
+      │   ├─STRING {''month'', id=3}
+      │   └─IDENTIFIER {val=created_at, id=4}
+      ├─FUNCTION {val=EXTRACT, schema=year, id=6, children=2}
+      │   ├─IDENTIFIER {val=YEAR, id=7}
+      │   └─COLUMN {val=created_at, id=8}
+      ├─FUNCTION {val=AGE, schema=account_age, id=9, children=2}
+      │   ├─FUNCTION {val=NOW, id=10}
+      │   └─IDENTIFIER {val=created_at, id=11}
+      └─BINARY {op=+, id=14, children=2}
+          ├─COLUMN {val=created_at, id=12}
+          └─COLUMN {val=INTERVAL, id=13}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #34 ===
+SQL: SELECT      product_name,     price,     ROUND(price * 0.9, 2) as discounted_price,     CEIL(stock / 10.0) as boxes_needed,     FLOOR(LOG(price)) as price_magnitude FROM products WHERE MOD(id, 2) = 0
+
+Parse Statistics:
+  Parse Time:          3 us
+  Node Count:         24 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=3}
+  ├─SELECT LIST {id=3, children=5}
+  │   ├─COLUMN {val=product_name, id=2}
+  │   ├─COLUMN {val=price, id=4}
+  │   ├─FUNCTION {val=ROUND, schema=discounted_price, id=5, children=2}
+  │   │   ├─BINARY {op=*, id=8, children=2}
+  │   │   │   ├─IDENTIFIER {val=price, id=6}
+  │   │   │   └─INT {val=0.9, id=7}
+  │   │   └─INT {val=2, id=9}
+  │   ├─FUNCTION {val=CEIL, schema=boxes_needed, id=10, children=1}
+  │   │   └─BINARY {op=/, id=13, children=2}
+  │   │       ├─IDENTIFIER {val=stock, id=11}
+  │   │       └─INT {val=10.0, id=12}
+  │   └─FUNCTION {val=FLOOR, schema=price_magnitude, id=14, children=1}
+  │       └─FUNCTION {val=LOG, id=15, children=1}
+  │           └─IDENTIFIER {val=price, id=16}
+  ├─FROM {id=18, children=1}
+  │   └─TABLE {val=products, id=17}
+  └─WHERE {id=24, children=1}
+      └─BINARY {op==, id=23, children=2}
+          ├─FUNCTION {val=MOD, id=19, children=2}
+          │   ├─IDENTIFIER {val=id, id=20}
+          │   └─INT {val=2, id=21}
+          └─INT {val=0, id=22}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #35 ===
+SQL: SELECT name, email FROM customers UNION SELECT name, email FROM suppliers
+
+Parse Statistics:
+  Parse Time:          1 us
+  Node Count:         13 nodes
+  Tree Depth:          4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+UNION {val=UNION, id=7, children=2}
+  ├─SELECT {id=1, children=2}
+  │   ├─SELECT LIST {id=3, children=2}
+  │   │   ├─COLUMN {val=name, id=2}
+  │   │   └─COLUMN {val=email, id=4}
+  │   └─FROM {id=6, children=1}
+  │       └─TABLE {val=customers, id=5}
+  └─SELECT {id=8, children=2}
+      ├─SELECT LIST {id=10, children=2}
+      │   ├─COLUMN {val=name, id=9}
+      │   └─COLUMN {val=email, id=11}
+      └─FROM {id=13, children=1}
+          └─TABLE {val=suppliers, id=12}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #36 ===
+SQL: SELECT product_id FROM orders_2023 INTERSECT SELECT product_id FROM orders_2024
+
+Parse Statistics:
+  Parse Time:          1 us
+  Node Count:         11 nodes
+  Tree Depth:          4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+INTERSECT {val=INTERSECT, id=6, children=2}
+  ├─SELECT {id=1, children=2}
+  │   ├─SELECT LIST {id=3, children=1}
+  │   │   └─COLUMN {val=product_id, id=2}
+  │   └─FROM {id=5, children=1}
+  │       └─TABLE {val=orders_2023, id=4}
+  └─SELECT {id=7, children=2}
+      ├─SELECT LIST {id=9, children=1}
+      │   └─COLUMN {val=product_id, id=8}
+      └─FROM {id=11, children=1}
+          └─TABLE {val=orders_2024, id=10}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #37 ===
+SQL: SELECT id FROM all_products EXCEPT SELECT product_id FROM discontinued_products
+
+Parse Statistics:
+  Parse Time:          1 us
+  Node Count:         11 nodes
+  Tree Depth:          4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+EXCEPT {val=EXCEPT, id=6, children=2}
+  ├─SELECT {id=1, children=2}
+  │   ├─SELECT LIST {id=3, children=1}
+  │   │   └─COLUMN {val=id, id=2}
+  │   └─FROM {id=5, children=1}
+  │       └─TABLE {val=all_products, id=4}
+  └─SELECT {id=7, children=2}
+      ├─SELECT LIST {id=9, children=1}
+      │   └─COLUMN {val=product_id, id=8}
+      └─FROM {id=11, children=1}
+          └─TABLE {val=discontinued_products, id=10}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #38 ===
+SQL: WITH monthly_sales AS (     SELECT          DATE_TRUNC('month', o.order_date) as month,         p.category,         SUM(oi.quantity * oi.unit_price) as revenue,         COUNT(DISTINCT o.id) as order_count,         COUNT(DISTINCT o.customer_id) as customer_count     FROM orders o     JOIN order_items oi ON o.id = oi.order_id     JOIN products p ON oi.product_id = p.id     WHERE o.order_date >= '2024-01-01'     GROUP BY DATE_TRUNC('month', o.order_date), p.category ) SELECT      month,     category,     revenue,     order_count,     customer_count,     revenue / NULLIF(order_count, 0) as avg_order_value,     LAG(revenue) OVER (PARTITION BY category ORDER BY month) as prev_month_revenue,     revenue - LAG(revenue) OVER (PARTITION BY category ORDER BY month) as month_over_month_change,     SUM(revenue) OVER (PARTITION BY category ORDER BY month ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cumulative_revenue FROM monthly_sales ORDER BY category, month
+
+Parse Statistics:
+  Parse Time:         16 us
+  Node Count:         80 nodes
+  Tree Depth:          8 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=38, children=4}
+  ├─NODE_94 {id=1, children=1}
+  │   └─CTE {val=monthly_sales, id=2, children=1}
+  │       └─SELECT {id=3, children=4}
+  │           ├─SELECT LIST {id=7, children=5}
+  │           │   ├─FUNCTION {val=DATE_TRUNC, schema=month, id=4, children=2}
+  │           │   │   ├─STRING {''month'', id=5}
+  │           │   │   └─COLUMN {val=o.order_date, id=6}
+  │           │   ├─COLUMN {val=p.category, id=8}
+  │           │   ├─FUNCTION {val=SUM, schema=revenue, id=9, children=1}
+  │           │   │   └─BINARY {op=*, id=12, children=2}
+  │           │   │       ├─COLUMN {val=oi.quantity, id=10}
+  │           │   │       └─COLUMN {val=oi.unit_price, id=11}
+  │           │   ├─FUNCTION {val=COUNT, schema=order_count, id=13, flags=DISTINCT, children=1}
+  │           │   │   └─COLUMN {val=o.id, id=14}
+  │           │   └─FUNCTION {val=COUNT, schema=customer_count, id=15, flags=DISTINCT, children=1}
+  │           │       └─COLUMN {val=o.customer_id, id=16}
+  │           ├─FROM {id=18, children=3}
+  │           │   ├─TABLE {val=orders, schema=o, id=17}
+  │           │   ├─JOIN {type=JOIN, id=19, children=2}
+  │           │   │   ├─TABLE {val=order_items, schema=oi, id=20}
+  │           │   │   └─BINARY {op==, id=23, children=2}
+  │           │   │       ├─COLUMN {val=o.id, id=21}
+  │           │   │       └─COLUMN {val=oi.order_id, id=22}
+  │           │   └─JOIN {type=JOIN, id=24, children=2}
+  │           │       ├─TABLE {val=products, schema=p, id=25}
+  │           │       └─BINARY {op==, id=28, children=2}
+  │           │           ├─COLUMN {val=oi.product_id, id=26}
+  │           │           └─COLUMN {val=p.id, id=27}
+  │           ├─WHERE {id=32, children=1}
+  │           │   └─BINARY {op=>=, id=31, children=2}
+  │           │       ├─COLUMN {val=o.order_date, id=29}
+  │           │       └─STRING {''2024-01-01'', id=30}
+  │           └─GROUP BY {id=33, children=2}
+  │               ├─FUNCTION {val=DATE_TRUNC, id=34, children=2}
+  │               │   ├─STRING {''month'', id=35}
+  │               │   └─COLUMN {val=o.order_date, id=36}
+  │               └─COLUMN {val=p.category, id=37}
+  ├─SELECT LIST {id=40, children=9}
+  │   ├─COLUMN {val=month, id=39}
+  │   ├─COLUMN {val=category, id=41}
+  │   ├─COLUMN {val=revenue, id=42}
+  │   ├─COLUMN {val=order_count, id=43}
+  │   ├─COLUMN {val=customer_count, id=44}
+  │   ├─BINARY {op=/, schema=avg_order_value, id=49, children=2}
+  │   │   ├─COLUMN {val=revenue, id=45}
+  │   │   └─FUNCTION {val=NULLIF, id=46, children=2}
+  │   │       ├─IDENTIFIER {val=order_count, id=47}
+  │   │       └─INT {val=0, id=48}
+  │   ├─FUNCTION {val=LAG, schema=prev_month_revenue, id=50, children=2}
+  │   │   ├─IDENTIFIER {val=revenue, id=51}
+  │   │   └─WINDOW {id=52, children=2}
+  │   │       ├─NODE_100 {id=53, children=1}
+  │   │       │   └─COLUMN {val=category, id=54}
+  │   │       └─ORDER BY {id=56, children=1}
+  │   │           └─COLUMN {val=month, id=55}
+  │   ├─BINARY {op=-, schema=month_over_month_change, id=65, children=2}
+  │   │   ├─COLUMN {val=revenue, id=57}
+  │   │   └─FUNCTION {val=LAG, id=58, children=2}
+  │   │       ├─IDENTIFIER {val=revenue, id=59}
+  │   │       └─WINDOW {id=60, children=2}
+  │   │           ├─NODE_100 {id=61, children=1}
+  │   │           │   └─COLUMN {val=category, id=62}
+  │   │           └─ORDER BY {id=64, children=1}
+  │   │               └─COLUMN {val=month, id=63}
+  │   └─FUNCTION {val=SUM, schema=cumulative_revenue, id=66, children=2}
+  │       ├─IDENTIFIER {val=revenue, id=67}
+  │       └─WINDOW {id=68, children=3}
+  │           ├─NODE_100 {id=69, children=1}
+  │           │   └─COLUMN {val=category, id=70}
+  │           ├─ORDER BY {id=72, children=1}
+  │           │   └─COLUMN {val=month, id=71}
+  │           └─NODE_102 {val=ROWS, id=73, children=2}
+  │               ├─NODE_103 {val=UNBOUNDED, schema=PRECEDING, id=74}
+  │               └─NODE_103 {val=CURRENT ROW, id=75}
+  ├─FROM {id=77, children=1}
+  │   └─TABLE {val=monthly_sales, id=76}
+  └─ORDER BY {id=79, children=2}
+      ├─COLUMN {val=category, id=78}
+      └─COLUMN {val=month, id=80}
+--------------------------------------------------
+
+------------------------------------------------------------
+
+=== Query #39 ===
+SQL: WITH cohorts AS (     SELECT          customer_id,         DATE_TRUNC('month', MIN(order_date)) as cohort_month,         DATE_TRUNC('month', order_date) as order_month,         SUM(total) as monthly_revenue     FROM orders     GROUP BY customer_id, DATE_TRUNC('month', order_date) ), cohort_sizes AS (     SELECT          cohort_month,         COUNT(DISTINCT customer_id) as cohort_size     FROM cohorts     GROUP BY cohort_month ) SELECT      c.cohort_month,     c.order_month,     EXTRACT(MONTH FROM AGE(c.order_month, c.cohort_month)) as months_since_first_purchase,     cs.cohort_size,     COUNT(DISTINCT c.customer_id) as active_customers,     ROUND(100.0 * COUNT(DISTINCT c.customer_id) / cs.cohort_size, 2) as retention_rate,     SUM(c.monthly_revenue) as cohort_revenue FROM cohorts c JOIN cohort_sizes cs ON c.cohort_month = cs.cohort_month GROUP BY c.cohort_month, c.order_month, cs.cohort_size ORDER BY c.cohort_month, c.order_month ===
+
+Parse Statistics:
+  Parse Time:          9 us
+  Node Count:         35 nodes
+  Tree Depth:          8 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=32, children=2}
+  ├─NODE_94 {id=1, children=2}
+  │   ├─CTE {val=cohorts, id=2, children=1}
+  │   │   └─SELECT {id=3, children=3}
+  │   │       ├─SELECT LIST {id=5, children=4}
+  │   │       │   ├─COLUMN {val=customer_id, id=4}
+  │   │       │   ├─FUNCTION {val=DATE_TRUNC, schema=cohort_month, id=6, children=2}
+  │   │       │   │   ├─STRING {''month'', id=7}
+  │   │       │   │   └─FUNCTION {val=MIN, id=8, children=1}
+  │   │       │   │       └─IDENTIFIER {val=order_date, id=9}
+  │   │       │   ├─FUNCTION {val=DATE_TRUNC, schema=order_month, id=10, children=2}
+  │   │       │   │   ├─STRING {''month'', id=11}
+  │   │       │   │   └─IDENTIFIER {val=order_date, id=12}
+  │   │       │   └─FUNCTION {val=SUM, schema=monthly_revenue, id=13, children=1}
+  │   │       │       └─IDENTIFIER {val=total, id=14}
+  │   │       ├─FROM {id=16, children=1}
+  │   │       │   └─TABLE {val=orders, id=15}
+  │   │       └─GROUP BY {id=17, children=2}
+  │   │           ├─COLUMN {val=customer_id, id=18}
+  │   │           └─FUNCTION {val=DATE_TRUNC, id=19, children=2}
+  │   │               ├─STRING {''month'', id=20}
+  │   │               └─IDENTIFIER {val=order_date, id=21}
+  │   └─CTE {val=cohort_sizes, id=22, children=1}
+  │       └─SELECT {id=23, children=3}
+  │           ├─SELECT LIST {id=25, children=2}
+  │           │   ├─COLUMN {val=cohort_month, id=24}
+  │           │   └─FUNCTION {val=COUNT, schema=cohort_size, id=26, flags=DISTINCT, children=1}
+  │           │       └─IDENTIFIER {val=customer_id, id=27}
+  │           ├─FROM {id=29, children=1}
+  │           │   └─TABLE {val=cohorts, id=28}
+  │           └─GROUP BY {id=30, children=1}
+  │               └─COLUMN {val=cohort_month, id=31}
+  └─SELECT LIST {id=34, children=2}
+      ├─COLUMN {val=c.cohort_month, id=33}
+      └─COLUMN {val=c.order_month, id=35}
+--------------------------------------------------
+
+============================================================
+                          SUMMARY
+============================================================
+Total queries:         39
+Successful:            38
+Failed:                 1
+Failed queries:    32
+============================================================

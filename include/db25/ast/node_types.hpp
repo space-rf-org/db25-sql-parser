@@ -90,6 +90,8 @@ enum class NodeType : uint8_t {
     UsingClause,     // JOIN USING or DELETE USING
     ValuesClause,    // VALUES (row), (row), ...
     GroupingElement, // GROUPING SETS/CUBE/ROLLUP
+    SetClause,       // UPDATE SET clause
+    RowExpr,         // Row expression in VALUES
     
     // === Reference Nodes ===
     TableRef,

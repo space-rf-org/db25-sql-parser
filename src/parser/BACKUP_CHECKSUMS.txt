@@ -1,0 +1,12 @@
+# Backup File Checksums - Created: 2025-08-31
+# SHA-256 checksums to verify backup integrity
+
+parser.cpp.backup:
+  Size: 170301 bytes
+  SHA256: 3f9edca6380caaadb83688b975758b03eada5bd0fe820627693b6e244ca51c5c
+  
+parser.cpp.backup.safe:
+  Size: 170301 bytes  
+  SHA256: 3f9edca6380caaadb83688b975758b03eada5bd0fe820627693b6e244ca51c5c
+
+Both files are identical - backup is secure.

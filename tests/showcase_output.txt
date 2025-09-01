@@ -1,0 +1,1205 @@
+================================================================
+AST Output for: tests/showcase_queries.sqls
+Generated: Sun Aug 31 18:14:15 PDT 2025
+Total queries: 39
+Options: --stats
+================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #1 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #1 ===
+SQL: SELECT * FROM users
+
+Parse Statistics:
+  Parse Time:        14 us
+  Node Count:         5 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   |- SELECT LIST
+   | `- *
+   `- FROM
+      `- TABLE: users
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #2 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #2 ===
+SQL: SELECT id, name, email FROM customers
+
+Parse Statistics:
+  Parse Time:        56 us
+  Node Count:         7 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   |- SELECT LIST
+   | |- COLUMN: id
+   | |- COLUMN: name
+   | `- COLUMN: email
+   `- FROM
+      `- TABLE: customers
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #3 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #3 ===
+SQL: SELECT * FROM products WHERE price > 100 AND stock > 0
+
+Parse Statistics:
+  Parse Time:        24 us
+  Node Count:        13 nodes
+  Tree Depth:         4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   |- SELECT LIST
+   | `- *
+   |- FROM
+   | `- TABLE: products
+   `- WHERE
+      `- BINARY: AND [AND]
+         |- BINARY: > [>]
+         | |- COLUMN: price
+         | `- INT: 100
+         `- BINARY: > [>]
+            |- COLUMN: stock
+            `- INT: 0
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #4 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #4 ===
+SQL: SELECT name, score FROM students ORDER BY score DESC LIMIT 10
+
+Parse Statistics:
+  Parse Time:        25 us
+  Node Count:        10 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   |- SELECT LIST
+   | |- COLUMN: name
+   | `- COLUMN: score
+   |- FROM
+   | `- TABLE: students
+   |- ORDER BY
+   | `- COLUMN: score
+   `- LIMIT
+      `- INT: 10
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #5 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #5 ===
+SQL: SELECT u.name, o.total  FROM users u  INNER JOIN orders o ON u.id = o.user_id
+
+Parse Statistics:
+  Parse Time:        22 us
+  Node Count:         3 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      `- COLUMN: u
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #6 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #6 ===
+SQL: SELECT c.name, o.order_date, p.product_name, oi.quantity FROM customers c JOIN orders o ON c.id = o.customer_id JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.order_date >= '2024-01-01'
+
+Parse Statistics:
+  Parse Time:        22 us
+  Node Count:         3 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      `- COLUMN: c
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #7 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #7 ===
+SQL: SELECT d.name, COUNT(e.id) as emp_count FROM departments d LEFT JOIN employees e ON d.id = e.dept_id GROUP BY d.id, d.name HAVING COUNT(e.id) > 5
+
+Parse Statistics:
+  Parse Time:        22 us
+  Node Count:         3 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      `- COLUMN: d
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #8 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #8 ===
+SQL: SELECT COUNT(*) as total, AVG(price) as avg_price FROM products
+
+Parse Statistics:
+  Parse Time:        18 us
+  Node Count:         3 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      `- COLUMN: COUNT
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #9 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #9 ===
+SQL: SELECT category, COUNT(*) as count, MAX(price) as max_price FROM products GROUP BY category HAVING COUNT(*) > 10
+
+Parse Statistics:
+  Parse Time:        25 us
+  Node Count:         4 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      |- COLUMN: category
+      `- COLUMN: COUNT
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #10 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #10 ===
+SQL: SELECT dept, job_title, COUNT(*) as count FROM employees GROUP BY GROUPING SETS ((dept), (job_title), (dept, job_title), ())
+
+Parse Statistics:
+  Parse Time:        22 us
+  Node Count:         5 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      |- COLUMN: dept
+      |- COLUMN: job_title
+      `- COLUMN: COUNT
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #11 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #11 ===
+SQL: SELECT      name,     department,     salary,     RANK() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rank FROM employees
+
+Parse Statistics:
+  Parse Time:        22 us
+  Node Count:         6 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      |- COLUMN: name
+      |- COLUMN: department
+      |- COLUMN: salary
+      `- COLUMN: RANK
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #12 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #12 ===
+SQL: SELECT      order_date,     amount,     SUM(amount) OVER (ORDER BY order_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_total FROM orders
+
+Parse Statistics:
+  Parse Time:        19 us
+  Node Count:         5 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      |- COLUMN: order_date
+      |- COLUMN: amount
+      `- COLUMN: SUM
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #13 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #13 ===
+SQL: SELECT      name,     score,     RANK() OVER (ORDER BY score DESC) as rank,     DENSE_RANK() OVER (ORDER BY score DESC) as dense_rank,     NTILE(4) OVER (ORDER BY score DESC) as quartile FROM students
+
+Parse Statistics:
+  Parse Time:        22 us
+  Node Count:         5 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      |- COLUMN: name
+      |- COLUMN: score
+      `- COLUMN: RANK
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #14 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #14 ===
+SQL: WITH high_value_customers AS (     SELECT customer_id, SUM(total) as total_spent     FROM orders     GROUP BY customer_id     HAVING SUM(total) > 10000 ) SELECT c.name, h.total_spent FROM customers c JOIN high_value_customers h ON c.id = h.customer_id
+
+[ERROR] Parse Error
+  Line 1, Column 59: Failed to parse statement
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #15 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #15 ===
+SQL: WITH RECURSIVE employee_hierarchy AS (     SELECT id, name, manager_id, 0 as level     FROM employees     WHERE manager_id IS NULL     UNION ALL     SELECT e.id, e.name, e.manager_id, h.level + 1     FROM employees e     JOIN employee_hierarchy h ON e.manager_id = h.id ) SELECT * FROM employee_hierarchy ORDER BY level, name
+
+[ERROR] Parse Error
+  Line 1, Column 158: Failed to parse statement
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #16 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #16 ===
+SQL: WITH  sales_by_month AS (     SELECT          DATE_TRUNC('month', order_date) as month,         SUM(total) as monthly_total     FROM orders     GROUP BY DATE_TRUNC('month', order_date) ), avg_sales AS (     SELECT AVG(monthly_total) as avg_monthly     FROM sales_by_month ) SELECT      s.month,     s.monthly_total,     a.avg_monthly,     s.monthly_total - a.avg_monthly as variance FROM sales_by_month s CROSS JOIN avg_sales a
+
+[ERROR] Parse Error
+  Line 1, Column 57: Failed to parse statement
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #17 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #17 ===
+SQL: SELECT      name,     salary,     (SELECT AVG(salary) FROM employees) as avg_salary FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)
+
+[ERROR] Parse Error
+  Line 1, Column 46: Unclosed parenthesis
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #18 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #18 ===
+SQL: SELECT * FROM products WHERE category_id IN (     SELECT id FROM categories WHERE name LIKE '%Electronics%' )
+
+Parse Statistics:
+  Parse Time:        20 us
+  Node Count:        18 nodes
+  Tree Depth:         7 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   |- SELECT LIST
+   | `- *
+   |- FROM
+   | `- TABLE: products
+   `- WHERE
+      `- IN: IN
+         |- COLUMN: category_id
+         `- SUBQUERY
+            `- SELECT
+               |- SELECT LIST
+               | `- COLUMN: id
+               |- FROM
+               | `- TABLE: categories
+               `- WHERE
+                  `- LIKE: LIKE
+                     |- COLUMN: name
+                     `- STRING: '%Electronics%'
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #19 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #19 ===
+SQL: SELECT c.* FROM customers c WHERE EXISTS (     SELECT 1 FROM orders o     WHERE o.customer_id = c.id     AND o.order_date >= CURRENT_DATE - INTERVAL '30 days' )
+
+[ERROR] Parse Error
+  Line 1, Column 150: Unclosed parenthesis
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #20 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #20 ===
+SQL: SELECT      e1.name,     e1.salary,     (SELECT COUNT(*) FROM employees e2       WHERE e2.department = e1.department       AND e2.salary > e1.salary) as higher_paid_in_dept FROM employees e1
+
+Parse Statistics:
+  Parse Time:        24 us
+  Node Count:         3 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      `- COLUMN: e1
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #21 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #21 ===
+SQL: SELECT      name,     CASE status         WHEN 'active' THEN 'Active User'         WHEN 'inactive' THEN 'Inactive User'         WHEN 'suspended' THEN 'Account Suspended'         ELSE 'Unknown Status'     END as status_label FROM users
+
+Parse Statistics:
+  Parse Time:        24 us
+  Node Count:        17 nodes
+  Tree Depth:         4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   |- SELECT LIST
+   | |- COLUMN: name
+   | `- CASE
+   |    |- IDENTIFIER: status
+   |    |- BINARY: WHEN [WHEN]
+   |    | |- STRING: 'active'
+   |    | `- STRING: 'Active User'
+   |    |- BINARY: WHEN [WHEN]
+   |    | |- STRING: 'inactive'
+   |    | `- STRING: 'Inactive User'
+   |    |- BINARY: WHEN [WHEN]
+   |    | |- STRING: 'suspended'
+   |    | `- STRING: 'Account Suspended'
+   |    `- STRING: 'Unknown Status'
+   `- FROM
+      `- TABLE: users
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #22 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #22 ===
+SQL: SELECT      product_name,     price,     CASE          WHEN price < 10 THEN 'Budget'         WHEN price BETWEEN 10 AND 50 THEN 'Standard'         WHEN price BETWEEN 50 AND 100 THEN 'Premium'         WHEN price > 100 THEN 'Luxury'         ELSE 'Unpriced'     END as price_category FROM products
+
+Parse Statistics:
+  Parse Time:        24 us
+  Node Count:        30 nodes
+  Tree Depth:         5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   |- SELECT LIST
+   | |- COLUMN: product_name
+   | |- COLUMN: price
+   | `- CASE
+   |    |- BINARY: WHEN [WHEN]
+   |    | |- BINARY: < [<]
+   |    | | |- IDENTIFIER: price
+   |    | | `- INT: 10
+   |    | `- STRING: 'Budget'
+   |    |- BINARY: WHEN [WHEN]
+   |    | |- BETWEEN: BETWEEN
+   |    | | |- IDENTIFIER: price
+   |    | | |- INT: 10
+   |    | | `- INT: 50
+   |    | `- STRING: 'Standard'
+   |    |- BINARY: WHEN [WHEN]
+   |    | |- BETWEEN: BETWEEN
+   |    | | |- IDENTIFIER: price
+   |    | | |- INT: 50
+   |    | | `- INT: 100
+   |    | `- STRING: 'Premium'
+   |    |- BINARY: WHEN [WHEN]
+   |    | |- BINARY: > [>]
+   |    | | |- IDENTIFIER: price
+   |    | | `- INT: 100
+   |    | `- STRING: 'Luxury'
+   |    `- STRING: 'Unpriced'
+   `- FROM
+      `- TABLE: products
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #23 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #23 ===
+SQL: INSERT INTO users (name, email, created_at)  VALUES ('John Doe', 'john@example.com', NOW())
+
+[ERROR] Parse Error
+  Line 1, Column 19: Failed to parse statement
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #24 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #24 ===
+SQL: INSERT INTO archived_orders  SELECT * FROM orders  WHERE order_date < '2023-01-01'
+
+Parse Statistics:
+  Parse Time:        20 us
+  Node Count:        11 nodes
+  Tree Depth:         4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- INSERT
+   |- TABLE: archived_orders
+   `- SELECT
+      |- SELECT LIST
+      | `- *
+      |- FROM
+      | `- TABLE: orders
+      `- WHERE
+         `- BINARY: < [<]
+            |- COLUMN: order_date
+            `- STRING: '2023-01-01'
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #25 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #25 ===
+SQL: UPDATE products  SET price = price * 1.1,      updated_at = NOW()  WHERE category = 'Electronics' AND stock > 0
+
+Parse Statistics:
+  Parse Time:        22 us
+  Node Count:        19 nodes
+  Tree Depth:         4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- UPDATE
+   |- TABLE: products
+   |- SET
+   | |- BINARY: = [=]
+   | | |- IDENTIFIER: price
+   | | `- BINARY: * [*]
+   | |    |- IDENTIFIER: price
+   | |    `- INT: 1.1
+   | `- BINARY: = [=]
+   |    |- IDENTIFIER: updated_at
+   |    `- FUNCTION: NOW
+   `- WHERE
+      `- BINARY: AND [AND]
+         |- BINARY: = [=]
+         | |- COLUMN: category
+         | `- STRING: 'Electronics'
+         `- BINARY: > [>]
+            |- COLUMN: stock
+            `- INT: 0
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #26 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #26 ===
+SQL: DELETE FROM sessions  WHERE last_activity < CURRENT_TIMESTAMP - INTERVAL '24 hours'
+
+Parse Statistics:
+  Parse Time:        18 us
+  Node Count:         8 nodes
+  Tree Depth:         4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- DELETE
+   |- TABLE: sessions
+   `- WHERE
+      `- BINARY: < [<]
+         |- COLUMN: last_activity
+         `- BINARY: - [-]
+            |- COLUMN: CURRENT_TIMESTAMP
+            `- COLUMN: INTERVAL
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #27 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #27 ===
+SQL: CREATE TABLE customers (     id SERIAL PRIMARY KEY,     name VARCHAR(100) NOT NULL,     email VARCHAR(255) UNIQUE NOT NULL,     phone VARCHAR(20),     address TEXT,     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP )
+
+Parse Statistics:
+  Parse Time:        19 us
+  Node Count:        23 nodes
+  Tree Depth:         3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- CREATE TABLE: customers
+   |- NODE_33: id
+   | |- NODE_36: SERIAL
+   | `- NODE_40: PRIMARY_KEY
+   |- NODE_33: name
+   | |- NODE_36: VARCHAR
+   | `- NODE_34: NOT_NULL
+   |- NODE_33: email
+   | |- NODE_36: VARCHAR
+   | |- NODE_41: UNIQUE
+   | `- NODE_34: NOT_NULL
+   |- NODE_33: phone
+   | `- NODE_36: VARCHAR
+   |- NODE_33: address
+   | `- NODE_36: TEXT
+   |- NODE_33: created_at
+   | |- NODE_36: TIMESTAMP
+   | `- NODE_37
+   |    `- IDENTIFIER: CURRENT_TIMESTAMP
+   `- NODE_33: updated_at
+      |- NODE_36: TIMESTAMP
+      `- NODE_37
+         `- IDENTIFIER: CURRENT_TIMESTAMP
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #28 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #28 ===
+SQL: CREATE TABLE orders (     id BIGSERIAL PRIMARY KEY,     customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,     order_date DATE NOT NULL DEFAULT CURRENT_DATE,     total DECIMAL(10, 2) NOT NULL CHECK (total >= 0),     status VARCHAR(20) DEFAULT 'pending',     CONSTRAINT valid_status CHECK (status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled')) )
+
+Parse Statistics:
+  Parse Time:        29 us
+  Node Count:        33 nodes
+  Tree Depth:         4 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- CREATE TABLE: orders
+   |- NODE_33: id
+   | |- NODE_36: BIGSERIAL
+   | `- NODE_40: PRIMARY_KEY
+   |- NODE_33: customer_id
+   | |- NODE_36: INTEGER
+   | |- NODE_34: NOT_NULL
+   | `- NODE_39: customers
+   |    `- IDENTIFIER: id
+   |- NODE_33: order_date
+   | |- NODE_36: DATE
+   | |- NODE_34: NOT_NULL
+   | `- NODE_37
+   |    `- IDENTIFIER: CURRENT_DATE
+   |- NODE_33: total
+   | |- NODE_36: DECIMAL
+   | |- NODE_34: NOT_NULL
+   | `- NODE_38
+   |    `- BINARY: >= [>=]
+   |       |- IDENTIFIER: total
+   |       `- INT: 0
+   |- NODE_33: status
+   | |- NODE_36: VARCHAR
+   | `- NODE_37
+   |    `- STRING: 'pending'
+   `- NODE_38
+      `- IN: IN
+         |- IDENTIFIER: status
+         |- STRING: 'pending'
+         |- STRING: 'processing'
+         |- STRING: 'shipped'
+         |- STRING: 'delivered'
+         `- STRING: 'cancelled'
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #29 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #29 ===
+SQL: CREATE INDEX idx_orders_customer_date  ON orders(customer_id, order_date DESC)
+
+Parse Statistics:
+  Parse Time:        11 us
+  Node Count:         3 nodes
+  Tree Depth:         1 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- CREATE INDEX: idx_orders_customer_date
+   |- NODE_42: customer_id
+   `- NODE_42: order_date
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #30 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #30 ===
+SQL: CREATE VIEW active_customers AS SELECT c.*, COUNT(o.id) as order_count FROM customers c LEFT JOIN orders o ON c.id = o.customer_id WHERE c.created_at >= CURRENT_DATE - INTERVAL '1 year' GROUP BY c.id
+
+Parse Statistics:
+  Parse Time:        23 us
+  Node Count:         5 nodes
+  Tree Depth:         3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- CREATE VIEW: active_customers
+   `- SELECT
+      `- SELECT LIST
+         |- *: c
+         `- COLUMN: COUNT
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #31 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #31 ===
+SQL: ALTER TABLE products  ADD COLUMN discount_percentage DECIMAL(5, 2) DEFAULT 0 CHECK (discount_percentage >= 0 AND discount_percentage <= 100)
+
+Parse Statistics:
+  Parse Time:        19 us
+  Node Count:        14 nodes
+  Tree Depth:         6 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- ALTER TABLE: products
+   `- NODE_43: ADD
+      `- NODE_33: discount_percentage
+         |- NODE_36: DECIMAL
+         |- NODE_37
+         | `- INT: 0
+         `- NODE_38
+            `- BINARY: AND [AND]
+               |- BINARY: >= [>=]
+               | |- IDENTIFIER: discount_percentage
+               | `- INT: 0
+               `- BINARY: <= [<=]
+                  |- IDENTIFIER: discount_percentage
+                  `- INT: 100
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #32 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #32 ===
+SQL: SELECT      UPPER(first_name) || ' ' || LOWER(last_name) as formatted_name,     SUBSTRING(email FROM 1 FOR POSITION('@' IN email) - 1) as username,     LENGTH(bio) as bio_length FROM users WHERE email LIKE '%@example.com'
+
+Parse Statistics:
+  Parse Time:        23 us
+  Node Count:         3 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      `- COLUMN: UPPER
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #33 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #33 ===
+SQL: SELECT      DATE_TRUNC('month', created_at) as month,     EXTRACT(YEAR FROM created_at) as year,     AGE(NOW(), created_at) as account_age,     created_at + INTERVAL '30 days' as trial_end FROM users WHERE created_at >= '2024-01-01'::DATE
+
+Parse Statistics:
+  Parse Time:        23 us
+  Node Count:         3 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      `- COLUMN: DATE_TRUNC
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #34 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #34 ===
+SQL: SELECT      product_name,     price,     ROUND(price * 0.9, 2) as discounted_price,     CEIL(stock / 10.0) as boxes_needed,     FLOOR(LOG(price)) as price_magnitude FROM products WHERE MOD(id, 2) = 0
+
+Parse Statistics:
+  Parse Time:        23 us
+  Node Count:         5 nodes
+  Tree Depth:         2 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- SELECT
+   `- SELECT LIST
+      |- COLUMN: product_name
+      |- COLUMN: price
+      `- COLUMN: ROUND
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #35 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #35 ===
+SQL: SELECT name, email FROM customers UNION SELECT name, email FROM suppliers
+
+Parse Statistics:
+  Parse Time:        20 us
+  Node Count:        13 nodes
+  Tree Depth:         3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- NODE_104: UNION
+   |- SELECT
+   | |- SELECT LIST
+   | | |- COLUMN: name
+   | | `- COLUMN: email
+   | `- FROM
+   |    `- TABLE: customers
+   `- SELECT
+      |- SELECT LIST
+      | |- COLUMN: name
+      | `- COLUMN: email
+      `- FROM
+         `- TABLE: suppliers
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #36 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #36 ===
+SQL: SELECT product_id FROM orders_2023 INTERSECT SELECT product_id FROM orders_2024
+
+Parse Statistics:
+  Parse Time:        18 us
+  Node Count:        11 nodes
+  Tree Depth:         3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- NODE_105: INTERSECT
+   |- SELECT
+   | |- SELECT LIST
+   | | `- COLUMN: product_id
+   | `- FROM
+   |    `- TABLE: orders_2023
+   `- SELECT
+      |- SELECT LIST
+      | `- COLUMN: product_id
+      `- FROM
+         `- TABLE: orders_2024
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #37 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #37 ===
+SQL: SELECT id FROM all_products EXCEPT SELECT product_id FROM discontinued_products
+
+Parse Statistics:
+  Parse Time:        20 us
+  Node Count:        11 nodes
+  Tree Depth:         3 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+`- NODE_106: EXCEPT
+   |- SELECT
+   | |- SELECT LIST
+   | | `- COLUMN: id
+   | `- FROM
+   |    `- TABLE: all_products
+   `- SELECT
+      |- SELECT LIST
+      | `- COLUMN: product_id
+      `- FROM
+         `- TABLE: discontinued_products
+--------------------------------------------------
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #38 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #38 ===
+SQL: WITH monthly_sales AS (     SELECT          DATE_TRUNC('month', o.order_date) as month,         p.category,         SUM(oi.quantity * oi.unit_price) as revenue,         COUNT(DISTINCT o.id) as order_count,         COUNT(DISTINCT o.customer_id) as customer_count     FROM orders o     JOIN order_items oi ON o.id = oi.order_id     JOIN products p ON oi.product_id = p.id     WHERE o.order_date >= '2024-01-01'     GROUP BY DATE_TRUNC('month', o.order_date), p.category ) SELECT      month,     category,     revenue,     order_count,     customer_count,     revenue / NULLIF(order_count, 0) as avg_order_value,     LAG(revenue) OVER (PARTITION BY category ORDER BY month) as prev_month_revenue,     revenue - LAG(revenue) OVER (PARTITION BY category ORDER BY month) as month_over_month_change,     SUM(revenue) OVER (PARTITION BY category ORDER BY month ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cumulative_revenue FROM monthly_sales ORDER BY category, month
+
+[ERROR] Parse Error
+  Line 1, Column 55: Failed to parse statement
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Query #39 of 39
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+==============================================================
+          DB25 SQL Parser - AST Viewer v1.0
+==============================================================
+
+[2mLoaded 39 queries from tests/showcase_queries.sqls[0m
+
+=== Query #39 ===
+SQL: WITH cohorts AS (     SELECT          customer_id,         DATE_TRUNC('month', MIN(order_date)) as cohort_month,         DATE_TRUNC('month', order_date) as order_month,         SUM(total) as monthly_revenue     FROM orders     GROUP BY customer_id, DATE_TRUNC('month', order_date) ), cohort_sizes AS (     SELECT          cohort_month,         COUNT(DISTINCT customer_id) as cohort_size     FROM cohorts     GROUP BY cohort_month ) SELECT      c.cohort_month,     c.order_month,     EXTRACT(MONTH FROM AGE(c.order_month, c.cohort_month)) as months_since_first_purchase,     cs.cohort_size,     COUNT(DISTINCT c.customer_id) as active_customers,     ROUND(100.0 * COUNT(DISTINCT c.customer_id) / cs.cohort_size, 2) as retention_rate,     SUM(c.monthly_revenue) as cohort_revenue FROM cohorts c JOIN cohort_sizes cs ON c.cohort_month = cs.cohort_month GROUP BY c.cohort_month, c.order_month, cs.cohort_size ORDER BY c.cohort_month, c.order_month
+
+[ERROR] Parse Error
+  Line 1, Column 70: Failed to parse statement
+
+
+
+================================================================
+                          SUMMARY
+================================================================
+Total queries:     39
+Successful:        39
+Failed:            0
+✓ All queries parsed successfully!
+================================================================

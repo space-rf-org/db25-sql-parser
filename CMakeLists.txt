@@ -52,14 +52,22 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 # Include directories for our own headers
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# Fetch and configure DB25 Tokenizer dependency
-include(FetchTokenizer)
+# Configure tokenizer submodule
+# The tokenizer is now a git submodule in external/tokenizer
+set(TOKENIZER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/tokenizer)
 
-# The tokenizer headers are now available via db25::tokenizer_headers target
-# and DB25_TOKENIZER_INCLUDE_DIR variable
+# Check if submodule is initialized
+if(NOT EXISTS "${TOKENIZER_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "Tokenizer submodule not initialized. Run: git submodule update --init --recursive")
+endif()
 
-# Get tokenizer sources using the function from our module
-get_tokenizer_sources(TOKENIZER_SOURCES)
+# Add tokenizer include directory
+include_directories(${TOKENIZER_DIR}/include)
+
+# Set tokenizer source files directly
+set(TOKENIZER_SOURCES
+    ${TOKENIZER_DIR}/src/simd_tokenizer.cpp
+)
 
 # Source files
 set(PARSER_SOURCES
@@ -68,6 +76,9 @@ set(PARSER_SOURCES
     src/parser/parser.cpp
     src/parser/parser_statements.cpp
     src/parser/parser_ddl.cpp
+    src/parser/parser_dml.cpp
+    src/parser/parser_expressions.cpp
+    src/parser/parser_select.cpp
     src/parser/tokenizer_adapter.cpp
     ${TOKENIZER_SOURCES}
 )
@@ -85,8 +96,7 @@ target_include_directories(db25parser PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-# Link to tokenizer headers using modern CMake target
-target_link_libraries(db25parser PRIVATE db25::tokenizer_headers)
+# Tokenizer headers are already included via include_directories above
 
 # Testing
 option(BUILD_TESTS "Build tests" ON)
@@ -195,7 +205,35 @@ if(BUILD_TESTS)
     # Comprehensive Parser Validation test
     add_parser_test_no_gtest(test_parser_validation tests/test_parser_validation.cpp)
     
+    # Comprehensive AST dump test - combines all visual dump functionality
+    add_parser_test_no_gtest(test_ast_dump tests/test_ast_dump.cpp)
+    
+    # Add custom target for generating visual dumps
+    add_custom_target(generate_ast_dumps
+        COMMAND test_ast_dump --save --verbose
+        DEPENDS test_ast_dump
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Generating visual AST dumps for all SQL query types"
+    )
+    
     # Debug tools can be added here as needed
+endif()
+
+# Tools
+option(BUILD_TOOLS "Build tools" ON)
+if(BUILD_TOOLS)
+    # Enhanced AST Viewer - Professional AST visualization tool with vivid colors
+    add_executable(ast_viewer_enhanced tools/ast_viewer_enhanced.cpp)
+    target_link_libraries(ast_viewer_enhanced db25parser pthread)
+    
+    # TPC-C Stress Test Runner - Performance benchmarking tool
+    add_executable(tpcc_stress_runner tests/tpcc_stress_runner.cpp)
+    target_link_libraries(tpcc_stress_runner db25parser pthread)
+    
+    # Install the tools
+    install(TARGETS ast_viewer_enhanced tpcc_stress_runner
+        RUNTIME DESTINATION bin
+    )
 endif()
 
 # Benchmarking

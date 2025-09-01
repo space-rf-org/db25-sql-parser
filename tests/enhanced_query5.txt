@@ -1,0 +1,29 @@
+
+==============================================================
+          DB25 SQL Parser - Enhanced AST Viewer v2.0
+==============================================================
+
+Loaded 39 queries from tests/showcase_queries.sqls
+
+=== Query #5 ===
+SQL: SELECT u.name, o.total  FROM users u  INNER JOIN orders o ON u.id = o.user_id
+
+Parse Statistics:
+  Parse Time:         14 us
+  Node Count:         11 nodes
+  Tree Depth:          5 levels
+
+Abstract Syntax Tree:
+--------------------------------------------------
+SELECT {id=1, children=2}
+  ├─SELECT LIST {id=3, children=2}
+  │   ├─COLUMN {val=u.name, id=2}
+  │   └─COLUMN {val=o.total, id=4}
+  └─FROM {id=6, children=2}
+      ├─TABLE {val=users, schema=u, id=5}
+      └─JOIN {type=INNER JOIN, id=7, children=2}
+          ├─TABLE {val=orders, schema=o, id=8}
+          └─BINARY {op==, id=11, children=2}
+              ├─COLUMN {val=u.id, id=9}
+              └─COLUMN {val=o.user_id, id=10}
+--------------------------------------------------

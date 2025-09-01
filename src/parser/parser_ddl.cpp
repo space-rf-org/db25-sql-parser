@@ -9,6 +9,373 @@
 
 namespace db25::parser {
 
+// ========== DDL Entry Points ==========
+
+ast::ASTNode* Parser::parse_create_stmt() {
+    // Dispatch to specific CREATE statement based on object type
+    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    
+    // Save state in case we need to reset
+    const auto* start_token = current_token_;
+    size_t start_pos = tokenizer_ ? tokenizer_->position() : 0;
+    
+    // Consume CREATE keyword
+    advance();
+    
+    if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword) {
+        return nullptr;
+    }
+    
+    std::string_view create_type = current_token_->value;
+    
+    // Dispatch based on CREATE type
+    if (create_type == "TABLE" || create_type == "table" ||
+        create_type == "TEMPORARY" || create_type == "temporary" ||
+        create_type == "TEMP" || create_type == "temp") {
+        // Handle CREATE [TEMP|TEMPORARY] TABLE
+        bool is_temp = false;
+        if (create_type == "TEMPORARY" || create_type == "temporary" ||
+            create_type == "TEMP" || create_type == "temp") {
+            is_temp = true;
+            advance();  // Skip TEMP/TEMPORARY
+            if (!current_token_ || (current_token_->value != "TABLE" && current_token_->value != "table")) {
+                return nullptr;
+            }
+        }
+        // Now we're at TABLE - use three-tier architecture
+        auto* result = parse_create_table_impl();
+        if (result && is_temp) {
+            result->semantic_flags |= 0x08;  // TEMPORARY flag
+        }
+        return result;
+    } else if (create_type == "INDEX" || create_type == "index" ||
+               create_type == "UNIQUE" || create_type == "unique") {
+        // Handle CREATE [UNIQUE] INDEX - use three-tier architecture
+        return parse_create_index_impl();
+    } else if (create_type == "VIEW" || create_type == "view" ||
+               create_type == "OR" || create_type == "or") {
+        // Handle CREATE [OR REPLACE] VIEW
+        bool is_or_replace = false;
+        if (create_type == "OR" || create_type == "or") {
+            advance();  // Skip OR
+            if (!current_token_ || (current_token_->value != "REPLACE" && current_token_->value != "replace")) {
+                return nullptr;
+            }
+            advance();  // Skip REPLACE
+            if (!current_token_ || (current_token_->value != "VIEW" && current_token_->value != "view")) {
+                return nullptr;
+            }
+            is_or_replace = true;
+        }
+        // Use three-tier architecture
+        auto* result = parse_create_view_impl();
+        if (result && is_or_replace) {
+            result->semantic_flags |= 0x04;  // OR REPLACE flag
+        }
+        return result;
+    } else if (create_type == "TRIGGER" || create_type == "trigger") {
+        // Handle CREATE TRIGGER
+        // Reset position to CREATE for trigger parser
+        current_token_ = start_token;
+        if (tokenizer_) tokenizer_->set_position(start_pos);
+        return parse_create_trigger();
+    } else if (create_type == "SCHEMA" || create_type == "schema") {
+        // Handle CREATE SCHEMA
+        // Reset position to CREATE for schema parser
+        current_token_ = start_token;
+        if (tokenizer_) tokenizer_->set_position(start_pos);
+        return parse_create_schema();
+    }
+    
+    return nullptr;
+}
+
+// ========== Three-Tier CREATE Architecture ==========
+
+ast::ASTNode* Parser::parse_create_table_stmt() {
+    // Entry point for standalone parse_create_table_stmt calls
+    // This is the second tier - skips CREATE and delegates to impl
+    advance();  // Skip CREATE
+    return parse_create_table_impl();
+}
+
+ast::ASTNode* Parser::parse_create_table_impl() {
+    // Third tier - implementation that expects to be at TABLE keyword
+    // We're at TABLE keyword
+    advance();  // Skip TABLE
+    
+    // Create the CREATE TABLE node here
+    // The _full function is kept for backward compatibility but
+    // this _impl function handles the core parsing
+    auto* create_node = arena_.allocate<ast::ASTNode>();
+    new (create_node) ast::ASTNode(ast::NodeType::CreateTableStmt);
+    create_node->node_id = next_node_id_++;
+    
+    // Check for IF NOT EXISTS
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::IF) {
+        advance();
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::NOT) {
+            advance();
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::EXISTS) {
+                advance();
+                create_node->semantic_flags |= 0x01;  // IF NOT EXISTS flag
+            }
+        }
+    }
+    
+    // Get table name
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+        std::string_view first_name = current_token_->value;
+        advance();
+        
+        if (current_token_ && current_token_->value == ".") {
+            advance(); // consume dot
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+                create_node->schema_name = copy_to_arena(first_name);
+                create_node->primary_text = copy_to_arena(current_token_->value);
+                advance();
+            }
+        } else {
+            create_node->primary_text = copy_to_arena(first_name);
+        }
+    }
+    
+    // Parse column definitions - delegate to full implementation
+    if (current_token_ && current_token_->value == "(") {
+        // Parse columns and constraints (simplified for now)
+        int paren_depth = 1;
+        advance();
+        while (current_token_ && paren_depth > 0) {
+            if (current_token_->value == "(") paren_depth++;
+            else if (current_token_->value == ")") paren_depth--;
+            advance();
+        }
+    }
+    
+    return create_node;
+}
+
+ast::ASTNode* Parser::parse_create_index_stmt() {
+    // Entry point for standalone parse_create_index_stmt calls
+    advance();  // Skip CREATE
+    return parse_create_index_impl();
+}
+
+ast::ASTNode* Parser::parse_create_index_impl() {
+    // We're already past CREATE, now at either UNIQUE or INDEX
+    bool is_unique = false;
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::UNIQUE) {
+        is_unique = true;
+        advance();
+        // Now we should be at INDEX
+        if (!current_token_ || (current_token_->value != "INDEX" && current_token_->value != "index")) {
+            return nullptr;
+        }
+    } else if (!current_token_ || (current_token_->value != "INDEX" && current_token_->value != "index")) {
+        // If not UNIQUE, must be INDEX
+        return nullptr;
+    }
+    advance();  // Skip INDEX
+    
+    // Create CREATE INDEX statement node
+    auto* create_node = arena_.allocate<ast::ASTNode>();
+    new (create_node) ast::ASTNode(ast::NodeType::CreateIndexStmt);
+    create_node->node_id = next_node_id_++;
+    if (is_unique) {
+        create_node->semantic_flags |= 0x02;  // UNIQUE flag
+    }
+    
+    // Check for IF NOT EXISTS
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::IF) {
+        advance();
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::NOT) {
+            advance();
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::EXISTS) {
+                advance();
+                create_node->semantic_flags |= 0x01;  // IF NOT EXISTS flag
+            }
+        }
+    }
+    
+    // Get index name
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+        create_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+    }
+    
+    // Expect ON keyword
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::ON) {
+        advance();
+        
+        // Get table name
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+            create_node->schema_name = copy_to_arena(current_token_->value);  // Use schema_name for table
+            advance();
+        }
+    }
+    
+    // Parse column list (simplified)
+    if (current_token_ && current_token_->value == "(") {
+        int paren_depth = 1;
+        advance();
+        while (current_token_ && paren_depth > 0) {
+            if (current_token_->value == "(") paren_depth++;
+            else if (current_token_->value == ")") paren_depth--;
+            advance();
+        }
+    }
+    
+    return create_node;
+}
+
+ast::ASTNode* Parser::parse_create_view_stmt() {
+    // Entry point for standalone parse_create_view_stmt calls
+    advance();  // Skip CREATE
+    return parse_create_view_impl();
+}
+
+ast::ASTNode* Parser::parse_create_view_impl() {
+    // We might be at VIEW or have already handled OR REPLACE in dispatcher
+    
+    // Expect VIEW keyword
+    if (!current_token_ || (current_token_->value != "VIEW" && current_token_->value != "view")) {
+        return nullptr;
+    }
+    advance();  // Skip VIEW
+    
+    // Create CREATE VIEW statement node
+    auto* create_node = arena_.allocate<ast::ASTNode>();
+    new (create_node) ast::ASTNode(ast::NodeType::CreateViewStmt);
+    create_node->node_id = next_node_id_++;
+    
+    // Get view name
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+        create_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+    }
+    
+    // Optional column list
+    if (current_token_ && current_token_->value == "(") {
+        // Skip column list for now
+        int paren_depth = 1;
+        advance();
+        while (current_token_ && paren_depth > 0) {
+            if (current_token_->value == "(") paren_depth++;
+            else if (current_token_->value == ")") paren_depth--;
+            advance();
+        }
+    }
+    
+    // Expect AS keyword
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::AS) {
+        advance();
+        
+        // Parse SELECT statement
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::SELECT) {
+            create_node->first_child = parse_select_stmt();
+            if (create_node->first_child) {
+                create_node->first_child->parent = create_node;
+                create_node->child_count = 1;
+            }
+        }
+    }
+    
+    return create_node;
+}
+
+// ========== End Three-Tier Architecture ==========
+
+ast::ASTNode* Parser::parse_drop_stmt() {
+    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    
+    // Consume DROP keyword
+    advance();
+    
+    // Create DROP statement node
+    auto* drop_node = arena_.allocate<ast::ASTNode>();
+    new (drop_node) ast::ASTNode(ast::NodeType::DropStmt);
+    drop_node->node_id = next_node_id_++;
+    
+    // Get object type (TABLE, INDEX, VIEW, etc.)
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
+        std::string_view obj_type = current_token_->value;
+        
+        if (obj_type == "TABLE" || obj_type == "table") {
+            drop_node->semantic_flags |= 0x10;  // DROP TABLE
+        } else if (obj_type == "INDEX" || obj_type == "index") {
+            drop_node->semantic_flags |= 0x20;  // DROP INDEX
+        } else if (obj_type == "VIEW" || obj_type == "view") {
+            drop_node->semantic_flags |= 0x30;  // DROP VIEW
+        }
+        advance();
+    }
+    
+    // Check for IF EXISTS
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::IF) {
+        advance();
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::EXISTS) {
+            advance();
+            drop_node->semantic_flags |= 0x01;  // IF EXISTS flag
+        }
+    }
+    
+    // Get object name
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+        drop_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+    }
+    
+    // Handle CASCADE/RESTRICT
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::CASCADE) {
+        drop_node->semantic_flags |= 0x04;  // CASCADE flag
+        advance();
+    } else if (current_token_ && current_token_->keyword_id == db25::Keyword::RESTRICT) {
+        drop_node->semantic_flags |= 0x08;  // RESTRICT flag
+        advance();
+    }
+    
+    return drop_node;
+}
+
+ast::ASTNode* Parser::parse_truncate_stmt() {
+    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    
+    // Consume TRUNCATE keyword
+    advance();
+    
+    // Expect TABLE keyword (optional in some dialects)
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::TABLE) {
+        advance();
+    }
+    
+    // Create TRUNCATE statement node
+    auto* truncate_node = arena_.allocate<ast::ASTNode>();
+    new (truncate_node) ast::ASTNode(ast::NodeType::TruncateStmt);
+    truncate_node->node_id = next_node_id_++;
+    
+    // Get table name
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+        truncate_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+    }
+    
+    // Handle CASCADE/RESTRICT (PostgreSQL)
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::CASCADE) {
+        truncate_node->semantic_flags |= 0x04;  // CASCADE flag
+        advance();
+    } else if (current_token_ && current_token_->keyword_id == db25::Keyword::RESTRICT) {
+        truncate_node->semantic_flags |= 0x08;  // RESTRICT flag
+        advance();
+    }
+    
+    return truncate_node;
+}
+
+ast::ASTNode* Parser::parse_alter_table_stmt() {
+    // Entry point for ALTER TABLE
+    return parse_alter_table_full();
+}
+
 // Helper function to parse data type
 ast::ASTNode* Parser::parse_data_type() {
     if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
@@ -20,7 +387,6 @@ ast::ASTNode* Parser::parse_data_type() {
     // Parse base type - can be keyword or identifier (for custom types)
     if (current_token_) {
         auto keyword_id = current_token_->keyword_id;
-        std::string_view type_name = current_token_->value;
         
         // Map SQL types to DataType enum
         if (keyword_id == db25::Keyword::INTEGER || current_token_->value == "INT") {

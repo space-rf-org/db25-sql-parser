@@ -1,0 +1,415 @@
+# DB25 SQL Parser - Showcase Queries
+# This file contains a comprehensive collection of SQL queries
+# demonstrating the parser's capabilities
+# Format: Each query separated by --- or ===
+
+# ============================================
+# BASIC DATA QUERY LANGUAGE (DQL)
+# ============================================
+
+# Simple SELECT
+SELECT * FROM users
+---
+
+# SELECT with columns
+SELECT id, name, email FROM customers
+---
+
+# SELECT with WHERE
+SELECT * FROM products WHERE price > 100 AND stock > 0
+---
+
+# SELECT with ORDER BY and LIMIT
+SELECT name, score FROM students ORDER BY score DESC LIMIT 10
+---
+
+# ============================================
+# JOINS
+# ============================================
+
+# INNER JOIN
+SELECT u.name, o.total 
+FROM users u 
+INNER JOIN orders o ON u.id = o.user_id
+---
+
+# Multiple JOINs
+SELECT c.name, o.order_date, p.product_name, oi.quantity
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN order_items oi ON o.id = oi.order_id
+JOIN products p ON oi.product_id = p.id
+WHERE o.order_date >= '2024-01-01'
+---
+
+# LEFT JOIN with subquery
+SELECT d.name, COUNT(e.id) as emp_count
+FROM departments d
+LEFT JOIN employees e ON d.id = e.dept_id
+GROUP BY d.id, d.name
+HAVING COUNT(e.id) > 5
+---
+
+# ============================================
+# AGGREGATIONS AND GROUPING
+# ============================================
+
+# Simple aggregation
+SELECT COUNT(*) as total, AVG(price) as avg_price FROM products
+---
+
+# GROUP BY with HAVING
+SELECT category, COUNT(*) as count, MAX(price) as max_price
+FROM products
+GROUP BY category
+HAVING COUNT(*) > 10
+---
+
+# GROUPING SETS
+SELECT dept, job_title, COUNT(*) as count
+FROM employees
+GROUP BY GROUPING SETS ((dept), (job_title), (dept, job_title), ())
+---
+
+# ============================================
+# WINDOW FUNCTIONS
+# ============================================
+
+# RANK with PARTITION BY
+SELECT 
+    name,
+    department,
+    salary,
+    RANK() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rank
+FROM employees
+---
+
+# ROW_NUMBER with frame
+SELECT 
+    order_date,
+    amount,
+    SUM(amount) OVER (ORDER BY order_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_total
+FROM orders
+---
+
+# Multiple window functions
+SELECT 
+    name,
+    score,
+    RANK() OVER (ORDER BY score DESC) as rank,
+    DENSE_RANK() OVER (ORDER BY score DESC) as dense_rank,
+    NTILE(4) OVER (ORDER BY score DESC) as quartile
+FROM students
+---
+
+# ============================================
+# COMMON TABLE EXPRESSIONS (CTEs)
+# ============================================
+
+# Simple CTE
+WITH high_value_customers AS (
+    SELECT customer_id, SUM(total) as total_spent
+    FROM orders
+    GROUP BY customer_id
+    HAVING SUM(total) > 10000
+)
+SELECT c.name, h.total_spent
+FROM customers c
+JOIN high_value_customers h ON c.id = h.customer_id
+---
+
+# Recursive CTE
+WITH RECURSIVE employee_hierarchy AS (
+    SELECT id, name, manager_id, 0 as level
+    FROM employees
+    WHERE manager_id IS NULL
+    UNION ALL
+    SELECT e.id, e.name, e.manager_id, h.level + 1
+    FROM employees e
+    JOIN employee_hierarchy h ON e.manager_id = h.id
+)
+SELECT * FROM employee_hierarchy ORDER BY level, name
+---
+
+# Multiple CTEs
+WITH 
+sales_by_month AS (
+    SELECT 
+        DATE_TRUNC('month', order_date) as month,
+        SUM(total) as monthly_total
+    FROM orders
+    GROUP BY DATE_TRUNC('month', order_date)
+),
+avg_sales AS (
+    SELECT AVG(monthly_total) as avg_monthly
+    FROM sales_by_month
+)
+SELECT 
+    s.month,
+    s.monthly_total,
+    a.avg_monthly,
+    s.monthly_total - a.avg_monthly as variance
+FROM sales_by_month s
+CROSS JOIN avg_sales a
+---
+
+# ============================================
+# SUBQUERIES
+# ============================================
+
+# Scalar subquery
+SELECT 
+    name,
+    salary,
+    (SELECT AVG(salary) FROM employees) as avg_salary
+FROM employees
+WHERE salary > (SELECT AVG(salary) FROM employees)
+---
+
+# IN subquery
+SELECT * FROM products
+WHERE category_id IN (
+    SELECT id FROM categories WHERE name LIKE '%Electronics%'
+)
+---
+
+# EXISTS subquery
+SELECT c.* FROM customers c
+WHERE EXISTS (
+    SELECT 1 FROM orders o
+    WHERE o.customer_id = c.id
+    AND o.order_date >= CURRENT_DATE - INTERVAL '30 days'
+)
+---
+
+# Correlated subquery
+SELECT 
+    e1.name,
+    e1.salary,
+    (SELECT COUNT(*) FROM employees e2 
+     WHERE e2.department = e1.department 
+     AND e2.salary > e1.salary) as higher_paid_in_dept
+FROM employees e1
+---
+
+# ============================================
+# CASE EXPRESSIONS
+# ============================================
+
+# Simple CASE
+SELECT 
+    name,
+    CASE status
+        WHEN 'active' THEN 'Active User'
+        WHEN 'inactive' THEN 'Inactive User'
+        WHEN 'suspended' THEN 'Account Suspended'
+        ELSE 'Unknown Status'
+    END as status_label
+FROM users
+---
+
+# Searched CASE
+SELECT 
+    product_name,
+    price,
+    CASE 
+        WHEN price < 10 THEN 'Budget'
+        WHEN price BETWEEN 10 AND 50 THEN 'Standard'
+        WHEN price BETWEEN 50 AND 100 THEN 'Premium'
+        WHEN price > 100 THEN 'Luxury'
+        ELSE 'Unpriced'
+    END as price_category
+FROM products
+---
+
+# ============================================
+# DATA MANIPULATION LANGUAGE (DML)
+# ============================================
+
+# INSERT with VALUES
+INSERT INTO users (name, email, created_at) 
+VALUES ('John Doe', 'john@example.com', NOW())
+---
+
+# INSERT with SELECT
+INSERT INTO archived_orders 
+SELECT * FROM orders 
+WHERE order_date < '2023-01-01'
+---
+
+# UPDATE
+UPDATE products 
+SET price = price * 1.1, 
+    updated_at = NOW() 
+WHERE category = 'Electronics' AND stock > 0
+---
+
+# DELETE
+DELETE FROM sessions 
+WHERE last_activity < CURRENT_TIMESTAMP - INTERVAL '24 hours'
+---
+
+# ============================================
+# DATA DEFINITION LANGUAGE (DDL)
+# ============================================
+
+# CREATE TABLE
+CREATE TABLE customers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    address TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+---
+
+# CREATE TABLE with constraints
+CREATE TABLE orders (
+    id BIGSERIAL PRIMARY KEY,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    order_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    total DECIMAL(10, 2) NOT NULL CHECK (total >= 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    CONSTRAINT valid_status CHECK (status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled'))
+)
+---
+
+# CREATE INDEX
+CREATE INDEX idx_orders_customer_date 
+ON orders(customer_id, order_date DESC)
+---
+
+# CREATE VIEW
+CREATE VIEW active_customers AS
+SELECT c.*, COUNT(o.id) as order_count
+FROM customers c
+LEFT JOIN orders o ON c.id = o.customer_id
+WHERE c.created_at >= CURRENT_DATE - INTERVAL '1 year'
+GROUP BY c.id
+---
+
+# ALTER TABLE
+ALTER TABLE products 
+ADD COLUMN discount_percentage DECIMAL(5, 2) DEFAULT 0 CHECK (discount_percentage >= 0 AND discount_percentage <= 100)
+---
+
+# ============================================
+# ADVANCED EXPRESSIONS
+# ============================================
+
+# String operations
+SELECT 
+    UPPER(first_name) || ' ' || LOWER(last_name) as formatted_name,
+    SUBSTRING(email FROM 1 FOR POSITION('@' IN email) - 1) as username,
+    LENGTH(bio) as bio_length
+FROM users
+WHERE email LIKE '%@example.com'
+---
+
+# Date/Time operations
+SELECT 
+    DATE_TRUNC('month', created_at) as month,
+    EXTRACT(YEAR FROM created_at) as year,
+    AGE(NOW(), created_at) as account_age,
+    created_at + INTERVAL '30 days' as trial_end
+FROM users
+WHERE created_at >= '2024-01-01'::DATE
+---
+
+# Mathematical operations
+SELECT 
+    product_name,
+    price,
+    ROUND(price * 0.9, 2) as discounted_price,
+    CEIL(stock / 10.0) as boxes_needed,
+    FLOOR(LOG(price)) as price_magnitude
+FROM products
+WHERE MOD(id, 2) = 0
+---
+
+# ============================================
+# SET OPERATIONS
+# ============================================
+
+# UNION
+SELECT name, email FROM customers
+UNION
+SELECT name, email FROM suppliers
+---
+
+# INTERSECT
+SELECT product_id FROM orders_2023
+INTERSECT
+SELECT product_id FROM orders_2024
+---
+
+# EXCEPT
+SELECT id FROM all_products
+EXCEPT
+SELECT product_id FROM discontinued_products
+---
+
+# ============================================
+# COMPLEX ANALYTICAL QUERIES
+# ============================================
+
+# Sales analysis with multiple aggregations
+WITH monthly_sales AS (
+    SELECT 
+        DATE_TRUNC('month', o.order_date) as month,
+        p.category,
+        SUM(oi.quantity * oi.unit_price) as revenue,
+        COUNT(DISTINCT o.id) as order_count,
+        COUNT(DISTINCT o.customer_id) as customer_count
+    FROM orders o
+    JOIN order_items oi ON o.id = oi.order_id
+    JOIN products p ON oi.product_id = p.id
+    WHERE o.order_date >= '2024-01-01'
+    GROUP BY DATE_TRUNC('month', o.order_date), p.category
+)
+SELECT 
+    month,
+    category,
+    revenue,
+    order_count,
+    customer_count,
+    revenue / NULLIF(order_count, 0) as avg_order_value,
+    LAG(revenue) OVER (PARTITION BY category ORDER BY month) as prev_month_revenue,
+    revenue - LAG(revenue) OVER (PARTITION BY category ORDER BY month) as month_over_month_change,
+    SUM(revenue) OVER (PARTITION BY category ORDER BY month ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cumulative_revenue
+FROM monthly_sales
+ORDER BY category, month
+---
+
+# Customer cohort analysis
+WITH cohorts AS (
+    SELECT 
+        customer_id,
+        DATE_TRUNC('month', MIN(order_date)) as cohort_month,
+        DATE_TRUNC('month', order_date) as order_month,
+        SUM(total) as monthly_revenue
+    FROM orders
+    GROUP BY customer_id, DATE_TRUNC('month', order_date)
+),
+cohort_sizes AS (
+    SELECT 
+        cohort_month,
+        COUNT(DISTINCT customer_id) as cohort_size
+    FROM cohorts
+    GROUP BY cohort_month
+)
+SELECT 
+    c.cohort_month,
+    c.order_month,
+    EXTRACT(MONTH FROM AGE(c.order_month, c.cohort_month)) as months_since_first_purchase,
+    cs.cohort_size,
+    COUNT(DISTINCT c.customer_id) as active_customers,
+    ROUND(100.0 * COUNT(DISTINCT c.customer_id) / cs.cohort_size, 2) as retention_rate,
+    SUM(c.monthly_revenue) as cohort_revenue
+FROM cohorts c
+JOIN cohort_sizes cs ON c.cohort_month = cs.cohort_month
+GROUP BY c.cohort_month, c.order_month, cs.cohort_size
+ORDER BY c.cohort_month, c.order_month
+===

@@ -1,0 +1,87 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+bin/  # Compiled executables
+
+# Compiled files
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Test executables
+test_*
+!test_*.cpp
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*~
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+.clangd/
+compile_commands.json
+.cache/
+
+# Documentation build
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.synctex.gz
+docs/*.fls
+docs/*.fdb_latexmk
+
+# Generated dumps
+/tmp/db25_ast_dumps/
+*.ast
+*.dump
+
+# Debug files
+*.dSYM/
+*.pdb
+core
+vgcore.*
+
+# Coverage files
+*.gcov
+*.gcda
+*.gcno
+coverage/
+*.info
+
+# Profiling
+*.prof
+gmon.out
+callgrind.out.*
+
+# Package files
+*.tar.gz
+*.zip
+*.7z
+
+# External dependencies (if using package managers)
+vcpkg_installed/
+conan/
+_deps/
+
+# Python cache (for any scripts)
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Local configuration
+.env
+.env.local
