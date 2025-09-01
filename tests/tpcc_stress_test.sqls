@@ -1,0 +1,497 @@
+# TPC-C Stress Test Queries for DB25 Parser
+# Based on TPC-C Benchmark Specification
+# Tests complex transactional SQL patterns
+
+# ============================================
+# NEW ORDER TRANSACTION
+# ============================================
+
+# Get warehouse tax rate
+SELECT w_tax FROM warehouse WHERE w_id = 1
+---
+
+# Get district info and increment next order ID
+SELECT d_tax, d_next_o_id 
+FROM district 
+WHERE d_w_id = 1 AND d_id = 5
+FOR UPDATE
+---
+
+# Update district next order ID
+UPDATE district 
+SET d_next_o_id = d_next_o_id + 1 
+WHERE d_w_id = 1 AND d_id = 5
+---
+
+# Get customer info including discount
+SELECT c_discount, c_last, c_credit 
+FROM customer 
+WHERE c_w_id = 1 AND c_d_id = 5 AND c_id = 2963
+---
+
+# Complex order insertion with multiple items
+INSERT INTO orders (o_id, o_d_id, o_w_id, o_c_id, o_entry_d, o_ol_cnt, o_all_local)
+VALUES (3001, 5, 1, 2963, CURRENT_TIMESTAMP, 5, 1)
+---
+
+# Insert new order record
+INSERT INTO new_order (no_o_id, no_d_id, no_w_id)
+VALUES (3001, 5, 1)
+---
+
+# Get item info for order line
+SELECT i_price, i_name, i_data 
+FROM item 
+WHERE i_id = 54321
+---
+
+# Get stock info with complex conditions
+SELECT s_quantity, s_dist_01, s_dist_02, s_dist_03, s_dist_04, s_dist_05,
+       s_dist_06, s_dist_07, s_dist_08, s_dist_09, s_dist_10,
+       s_ytd, s_order_cnt, s_remote_cnt, s_data
+FROM stock
+WHERE s_i_id = 54321 AND s_w_id = 1
+FOR UPDATE
+---
+
+# Update stock with complex calculations
+UPDATE stock
+SET s_quantity = CASE 
+                  WHEN s_quantity >= 10 + 5 THEN s_quantity - 5
+                  ELSE s_quantity - 5 + 91
+                 END,
+    s_ytd = s_ytd + 5,
+    s_order_cnt = s_order_cnt + 1,
+    s_remote_cnt = s_remote_cnt + CASE WHEN 1 != 1 THEN 1 ELSE 0 END
+WHERE s_i_id = 54321 AND s_w_id = 1
+---
+
+# Insert order line with all details
+INSERT INTO order_line (ol_o_id, ol_d_id, ol_w_id, ol_number, ol_i_id,
+                       ol_supply_w_id, ol_quantity, ol_amount,
+                       ol_dist_info, ol_delivery_d)
+VALUES (3001, 5, 1, 1, 54321, 1, 5, 149.95, 'S_DIST_05', NULL)
+---
+
+# ============================================
+# PAYMENT TRANSACTION
+# ============================================
+
+# Update warehouse year-to-date
+UPDATE warehouse 
+SET w_ytd = w_ytd + 2500.00 
+WHERE w_id = 1
+---
+
+# Get warehouse info for history
+SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name
+FROM warehouse
+WHERE w_id = 1
+---
+
+# Update district year-to-date
+UPDATE district 
+SET d_ytd = d_ytd + 2500.00 
+WHERE d_w_id = 1 AND d_id = 5
+---
+
+# Get district info for history
+SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name
+FROM district
+WHERE d_w_id = 1 AND d_id = 5
+---
+
+# Customer lookup by last name with complex ORDER BY
+SELECT c_id, c_first, c_middle, c_last, c_street_1, c_street_2,
+       c_city, c_state, c_zip, c_phone, c_credit, c_credit_lim,
+       c_discount, c_balance, c_since
+FROM customer
+WHERE c_w_id = 1 AND c_d_id = 5 AND c_last = 'BARBARBAR'
+ORDER BY c_first
+---
+
+# Update customer balance and payment info
+UPDATE customer
+SET c_balance = c_balance - 2500.00,
+    c_ytd_payment = c_ytd_payment + 2500.00,
+    c_payment_cnt = c_payment_cnt + 1
+WHERE c_w_id = 1 AND c_d_id = 5 AND c_id = 2963
+---
+
+# Update bad credit customer data
+UPDATE customer
+SET c_balance = c_balance - 2500.00,
+    c_ytd_payment = c_ytd_payment + 2500.00,
+    c_payment_cnt = c_payment_cnt + 1,
+    c_data = SUBSTRING(CONCAT(CAST(c_id AS CHAR), ' ', CAST(c_d_id AS CHAR), ' ',
+                              CAST(c_w_id AS CHAR), ' ', CAST(5 AS CHAR), ' ',
+                              CAST(1 AS CHAR), ' ', CAST(2500.00 AS CHAR), ' ',
+                              c_data), 1, 500)
+WHERE c_w_id = 1 AND c_d_id = 5 AND c_id = 2963
+---
+
+# Insert history record
+INSERT INTO history (h_c_d_id, h_c_w_id, h_c_id, h_d_id, h_w_id,
+                    h_date, h_amount, h_data)
+VALUES (5, 1, 2963, 5, 1, CURRENT_TIMESTAMP, 2500.00,
+        CONCAT('warehouse_name', '    ', 'district_name'))
+---
+
+# ============================================
+# ORDER STATUS TRANSACTION
+# ============================================
+
+# Get customer by ID
+SELECT c_balance, c_first, c_middle, c_last
+FROM customer
+WHERE c_w_id = 1 AND c_d_id = 5 AND c_id = 2963
+---
+
+# Get customer by last name for order status
+SELECT c_balance, c_first, c_middle, c_id
+FROM customer
+WHERE c_w_id = 1 AND c_d_id = 5 AND c_last = 'BARBARBAR'
+ORDER BY c_first
+---
+
+# Get latest order with complex subquery
+SELECT o_id, o_entry_d, o_carrier_id
+FROM orders
+WHERE o_w_id = 1 AND o_d_id = 5 AND o_c_id = 2963
+  AND o_id = (SELECT MAX(o_id) 
+              FROM orders 
+              WHERE o_w_id = 1 AND o_d_id = 5 AND o_c_id = 2963)
+---
+
+# Get order lines for order
+SELECT ol_i_id, ol_supply_w_id, ol_quantity, ol_amount, ol_delivery_d
+FROM order_line
+WHERE ol_w_id = 1 AND ol_d_id = 5 AND ol_o_id = 3001
+---
+
+# ============================================
+# DELIVERY TRANSACTION
+# ============================================
+
+# Get oldest new order for district
+SELECT no_o_id
+FROM new_order
+WHERE no_d_id = 5 AND no_w_id = 1
+ORDER BY no_o_id
+LIMIT 1
+FOR UPDATE
+---
+
+# Delete delivered new order
+DELETE FROM new_order
+WHERE no_o_id = 3001 AND no_d_id = 5 AND no_w_id = 1
+---
+
+# Get order customer ID
+SELECT o_c_id
+FROM orders
+WHERE o_id = 3001 AND o_d_id = 5 AND o_w_id = 1
+---
+
+# Update order with carrier
+UPDATE orders
+SET o_carrier_id = 7
+WHERE o_id = 3001 AND o_d_id = 5 AND o_w_id = 1
+---
+
+# Update order lines with delivery date
+UPDATE order_line
+SET ol_delivery_d = CURRENT_TIMESTAMP
+WHERE ol_o_id = 3001 AND ol_d_id = 5 AND ol_w_id = 1
+---
+
+# Sum order line amounts
+SELECT SUM(ol_amount) AS total_amount
+FROM order_line
+WHERE ol_o_id = 3001 AND ol_d_id = 5 AND ol_w_id = 1
+---
+
+# Update customer balance and delivery count
+UPDATE customer
+SET c_balance = c_balance + 3749.75,
+    c_delivery_cnt = c_delivery_cnt + 1
+WHERE c_id = 2963 AND c_d_id = 5 AND c_w_id = 1
+---
+
+# ============================================
+# STOCK LEVEL TRANSACTION
+# ============================================
+
+# Get district next order ID for stock check
+SELECT d_next_o_id
+FROM district
+WHERE d_w_id = 1 AND d_id = 5
+---
+
+# Complex stock level check with JOIN and subquery
+SELECT COUNT(DISTINCT s_i_id) AS low_stock_count
+FROM stock
+WHERE s_w_id = 1
+  AND s_quantity < 15
+  AND s_i_id IN (SELECT ol_i_id
+                 FROM order_line
+                 WHERE ol_w_id = 1
+                   AND ol_d_id = 5
+                   AND ol_o_id >= 2981
+                   AND ol_o_id < 3001)
+---
+
+# ============================================
+# ANALYTICAL QUERIES (TPC-C Extensions)
+# ============================================
+
+# Top customers by payment with window functions
+SELECT c_id, c_last, c_first,
+       SUM(h_amount) OVER (PARTITION BY c_id) as total_payments,
+       RANK() OVER (ORDER BY SUM(h_amount) DESC) as payment_rank
+FROM customer c
+JOIN history h ON c.c_id = h.h_c_id 
+              AND c.c_d_id = h.h_c_d_id 
+              AND c.c_w_id = h.h_c_w_id
+WHERE c_w_id = 1
+GROUP BY c_id, c_last, c_first, h_amount
+---
+
+# District performance comparison
+WITH district_stats AS (
+  SELECT d_id, d_name,
+         COUNT(DISTINCT o_id) as order_count,
+         SUM(ol_amount) as total_revenue,
+         AVG(ol_amount) as avg_order_value
+  FROM district d
+  JOIN orders o ON d.d_id = o.o_d_id AND d.d_w_id = o.o_w_id
+  JOIN order_line ol ON o.o_id = ol.ol_o_id 
+                    AND o.o_d_id = ol.ol_d_id 
+                    AND o.o_w_id = ol.ol_w_id
+  WHERE d_w_id = 1
+  GROUP BY d_id, d_name
+)
+SELECT d_id, d_name, order_count, total_revenue, avg_order_value,
+       total_revenue / SUM(total_revenue) OVER () * 100 as revenue_percentage
+FROM district_stats
+ORDER BY total_revenue DESC
+---
+
+# Item popularity analysis
+SELECT i.i_id, i.i_name, 
+       COUNT(ol.ol_i_id) as times_ordered,
+       SUM(ol.ol_quantity) as total_quantity,
+       AVG(ol.ol_amount) as avg_amount,
+       MIN(o.o_entry_d) as first_ordered,
+       MAX(o.o_entry_d) as last_ordered
+FROM item i
+LEFT JOIN order_line ol ON i.i_id = ol.ol_i_id
+LEFT JOIN orders o ON ol.ol_o_id = o.o_id 
+                  AND ol.ol_d_id = o.o_d_id 
+                  AND ol.ol_w_id = o.o_w_id
+GROUP BY i.i_id, i.i_name
+HAVING COUNT(ol.ol_i_id) > 10
+ORDER BY times_ordered DESC
+LIMIT 100
+---
+
+# Customer credit analysis with CASE
+SELECT 
+  CASE 
+    WHEN c_credit = 'GC' THEN 'Good Credit'
+    WHEN c_credit = 'BC' THEN 'Bad Credit'
+    ELSE 'Unknown'
+  END as credit_status,
+  COUNT(*) as customer_count,
+  AVG(c_balance) as avg_balance,
+  AVG(c_credit_lim) as avg_credit_limit,
+  SUM(c_ytd_payment) as total_ytd_payments
+FROM customer
+GROUP BY c_credit
+---
+
+# Warehouse inventory value
+SELECT w.w_id, w.w_name,
+       COUNT(DISTINCT s.s_i_id) as unique_items,
+       SUM(s.s_quantity * i.i_price) as inventory_value,
+       AVG(s.s_quantity) as avg_stock_level,
+       MIN(s.s_quantity) as min_stock_level,
+       MAX(s.s_quantity) as max_stock_level
+FROM warehouse w
+JOIN stock s ON w.w_id = s.s_w_id
+JOIN item i ON s.s_i_id = i.i_id
+GROUP BY w.w_id, w.w_name
+---
+
+# Order fulfillment time analysis
+SELECT 
+  DATE(o_entry_d) as order_date,
+  COUNT(*) as total_orders,
+  COUNT(CASE WHEN o_carrier_id IS NOT NULL THEN 1 END) as delivered_orders,
+  AVG(CASE 
+      WHEN o_carrier_id IS NOT NULL 
+      THEN EXTRACT(EPOCH FROM (ol_delivery_d - o_entry_d)) / 3600
+      ELSE NULL 
+      END) as avg_delivery_hours
+FROM orders o
+LEFT JOIN order_line ol ON o.o_id = ol.ol_o_id 
+                       AND o.o_d_id = ol.ol_d_id 
+                       AND o.o_w_id = ol.ol_w_id
+WHERE o_entry_d >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY DATE(o_entry_d)
+ORDER BY order_date DESC
+---
+
+# Complex JOIN with multiple conditions
+SELECT c.c_id, c.c_last, c.c_first,
+       w.w_name as warehouse,
+       d.d_name as district,
+       COUNT(DISTINCT o.o_id) as order_count,
+       SUM(ol.ol_amount) as total_spent,
+       MAX(o.o_entry_d) as last_order_date
+FROM customer c
+JOIN warehouse w ON c.c_w_id = w.w_id
+JOIN district d ON c.c_d_id = d.d_id AND c.c_w_id = d.d_w_id
+LEFT JOIN orders o ON c.c_id = o.o_c_id 
+                  AND c.c_d_id = o.o_d_id 
+                  AND c.c_w_id = o.o_w_id
+LEFT JOIN order_line ol ON o.o_id = ol.ol_o_id 
+                       AND o.o_d_id = ol.ol_d_id 
+                       AND o.o_w_id = ol.ol_w_id
+WHERE c.c_balance > 0
+GROUP BY c.c_id, c.c_last, c.c_first, w.w_name, d.d_name
+HAVING COUNT(DISTINCT o.o_id) > 5
+ORDER BY total_spent DESC
+LIMIT 50
+---
+
+# Recursive CTE for order dependencies
+WITH RECURSIVE order_chain AS (
+  SELECT o_id, o_c_id, o_d_id, o_w_id, o_entry_d, 1 as level
+  FROM orders
+  WHERE o_id = 3001
+  
+  UNION ALL
+  
+  SELECT o2.o_id, o2.o_c_id, o2.o_d_id, o2.o_w_id, o2.o_entry_d, oc.level + 1
+  FROM orders o2
+  JOIN order_chain oc ON o2.o_c_id = oc.o_c_id 
+                     AND o2.o_d_id = oc.o_d_id
+                     AND o2.o_w_id = oc.o_w_id
+                     AND o2.o_id > oc.o_id
+  WHERE oc.level < 5
+)
+SELECT * FROM order_chain
+---
+
+# Union query for all transaction types
+SELECT 'NEW_ORDER' as transaction_type, COUNT(*) as count
+FROM new_order
+WHERE no_w_id = 1
+UNION ALL
+SELECT 'PAYMENT' as transaction_type, COUNT(*) as count
+FROM history
+WHERE h_w_id = 1
+UNION ALL
+SELECT 'DELIVERY' as transaction_type, COUNT(*) as count
+FROM orders
+WHERE o_w_id = 1 AND o_carrier_id IS NOT NULL
+UNION ALL
+SELECT 'ORDER_STATUS' as transaction_type, COUNT(*) as count
+FROM orders
+WHERE o_w_id = 1
+---
+
+# ============================================
+# EXTREME STRESS TEST QUERIES
+# ============================================
+
+# Massive multi-table JOIN
+SELECT *
+FROM warehouse w
+CROSS JOIN district d
+CROSS JOIN customer c
+INNER JOIN orders o ON c.c_id = o.o_c_id
+INNER JOIN order_line ol ON o.o_id = ol.ol_o_id
+INNER JOIN item i ON ol.ol_i_id = i.i_id
+INNER JOIN stock s ON i.i_id = s.s_i_id
+LEFT JOIN new_order no ON o.o_id = no.no_o_id
+LEFT JOIN history h ON c.c_id = h.h_c_id
+WHERE w.w_id = d.d_w_id
+  AND d.d_id = c.c_d_id
+  AND c.c_w_id = o.o_w_id
+  AND o.o_d_id = ol.ol_d_id
+  AND s.s_w_id = w.w_id
+LIMIT 1000
+---
+
+# Deep nested subqueries
+SELECT c_id, c_last
+FROM customer
+WHERE c_id IN (
+  SELECT o_c_id
+  FROM orders
+  WHERE o_id IN (
+    SELECT ol_o_id
+    FROM order_line
+    WHERE ol_i_id IN (
+      SELECT i_id
+      FROM item
+      WHERE i_price > (
+        SELECT AVG(i_price)
+        FROM item
+        WHERE i_id IN (
+          SELECT s_i_id
+          FROM stock
+          WHERE s_quantity < (
+            SELECT AVG(s_quantity)
+            FROM stock
+          )
+        )
+      )
+    )
+  )
+)
+---
+
+# Complex CASE with nested conditions
+SELECT 
+  o_id,
+  CASE 
+    WHEN o_carrier_id IS NULL THEN 'Pending'
+    WHEN o_carrier_id BETWEEN 1 AND 3 THEN 
+      CASE 
+        WHEN o_ol_cnt > 10 THEN 'Large Express'
+        WHEN o_ol_cnt > 5 THEN 'Medium Express'
+        ELSE 'Small Express'
+      END
+    WHEN o_carrier_id BETWEEN 4 AND 7 THEN
+      CASE
+        WHEN o_all_local = 1 THEN 'Local Standard'
+        ELSE 'Remote Standard'
+      END
+    ELSE 
+      CASE
+        WHEN EXISTS (SELECT 1 FROM order_line 
+                    WHERE ol_o_id = o_id 
+                      AND ol_delivery_d IS NULL) THEN 'Partial Delivery'
+        ELSE 'Complete Delivery'
+      END
+  END as order_status
+FROM orders
+WHERE o_w_id = 1
+---
+
+# Maximum expression depth test
+SELECT 
+  ((((((((((c_balance + 100) * 1.1) - 50) / 2) + 300) * 0.95) - 25) + 
+   ((((c_credit_lim / 10) * 2) - 100) + 500)) / 5) * 
+   (CASE WHEN c_credit = 'GC' THEN 1.2 ELSE 0.8 END)) as complex_calc
+FROM customer
+WHERE ((c_balance > 100 AND c_balance < 1000) OR 
+       (c_balance >= 1000 AND c_balance < 5000)) AND
+      ((c_discount > 0.01 AND c_discount < 0.05) OR
+       (c_discount >= 0.05 AND c_discount < 0.10)) AND
+      (c_payment_cnt > 0 OR c_delivery_cnt > 0) AND
+      (c_w_id = 1 AND c_d_id IN (1,2,3,4,5,6,7,8,9,10))
+---

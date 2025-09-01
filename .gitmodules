@@ -1,0 +1,3 @@
+[submodule "external/tokenizer"]
+	path = external/tokenizer
+	url = https://github.com/space-rf-org/DB25-sql-tokenizer.git

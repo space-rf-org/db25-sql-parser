@@ -1,0 +1,49 @@
+\contentsline {section}{\numberline {1}Introduction}{3}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Context: The DB25 SQL Parser}{3}{subsection.1.1}%
+\contentsline {section}{\numberline {2}The Fundamental Problem}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}SQL's Context-Sensitive Nature}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}The Tokenizer's Perspective}{4}{subsection.2.2}%
+\contentsline {section}{\numberline {3}Current Implementation Analysis}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Approach 1: Generic Identifier Nodes}{4}{subsection.3.1}%
+\contentsline {subsubsection}{\numberline {3.1.1}Implementation}{4}{subsubsection.3.1.1}%
+\contentsline {subsection}{\numberline {3.2}Approach 2: Context-Aware Column References}{4}{subsection.3.2}%
+\contentsline {section}{\numberline {4}The Column Reference Dilemma}{5}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Why "Almost Certainly" Isn't Good Enough}{5}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}The Principal Engineer's Solution}{5}{subsection.4.2}%
+\contentsline {section}{\numberline {5}AST Structure Comparison}{6}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Memory Layout and Structure}{6}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Visual AST Comparison}{7}{subsection.5.2}%
+\contentsline {subsubsection}{\numberline {5.2.1}Current AST (Generic Identifiers)}{7}{subsubsection.5.2.1}%
+\contentsline {subsubsection}{\numberline {5.2.2}Proposed AST (Context-Aware)}{7}{subsubsection.5.2.2}%
+\contentsline {section}{\numberline {6}Implementation Strategies}{7}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Strategy 1: Conservative Approach}{7}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Strategy 2: Optimistic Approach}{8}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Strategy 3: Hybrid Approach (Recommended)}{8}{subsection.6.3}%
+\contentsline {section}{\numberline {7}Impact on Semantic Analysis}{8}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Phase 1: Symbol Resolution}{8}{subsection.7.1}%
+\contentsline {subsubsection}{\numberline {7.1.1}With Generic Identifiers}{8}{subsubsection.7.1.1}%
+\contentsline {subsubsection}{\numberline {7.1.2}With Context-Aware Nodes}{9}{subsubsection.7.1.2}%
+\contentsline {subsection}{\numberline {7.2}Phase 2: Type Checking}{9}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Phase 3: Query Optimization}{9}{subsection.7.3}%
+\contentsline {section}{\numberline {8}\emoji {racing-car} Performance Implications}{10}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Memory Access Patterns}{10}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Benchmark Results}{10}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}Branch Prediction Impact}{10}{subsection.8.3}%
+\contentsline {section}{\numberline {9}\emoji {compass} Context Hint System}{11}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Implementation of Parse Context Tracking}{11}{subsection.9.1}%
+\contentsline {subsubsection}{\numberline {9.1.1}Context Types}{11}{subsubsection.9.1.1}%
+\contentsline {subsubsection}{\numberline {9.1.2}Storage Mechanism}{11}{subsubsection.9.1.2}%
+\contentsline {subsubsection}{\numberline {9.1.3}Benefits of Context Hints}{11}{subsubsection.9.1.3}%
+\contentsline {section}{\numberline {10}\emoji {graduation-cap} Educational Takeaways}{12}{section.10}%
+\contentsline {subsection}{\numberline {10.1}Separation of Concerns is Not Always Clear-Cut}{12}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}Performance vs. Correctness Trade-offs}{12}{subsection.10.2}%
+\contentsline {subsection}{\numberline {10.3}The Importance of AST Design}{12}{subsection.10.3}%
+\contentsline {subsection}{\numberline {10.4}Context-Free vs. Context-Sensitive Parsing}{12}{subsection.10.4}%
+\contentsline {subsection}{\numberline {10.5}The Value of Explicit Uncertainty}{13}{subsection.10.5}%
+\contentsline {subsection}{\numberline {10.6}Cache-Aware Data Structure Design}{13}{subsection.10.6}%
+\contentsline {subsection}{\numberline {10.7}The Real Cost of Abstraction}{13}{subsection.10.7}%
+\contentsline {section}{\numberline {11}\emoji {check-mark-button} Conclusion}{13}{section.11}%
+\contentsline {section}{\numberline {12}References and Further Reading}{14}{section.12}%
+\contentsline {section}{\numberline {A}Test Case Analysis}{14}{appendix.A}%
+\contentsline {section}{\numberline {B}SIMD Optimization Context}{14}{appendix.B}%
+\contentsline {section}{\numberline {C}Grammar Specification Extract}{15}{appendix.C}%

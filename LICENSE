@@ -1,6 +1,9 @@
 MIT License
 
-Copyright (c) 2025 space-rf.org
+Copyright (c) 2024 Space-RF.org
+Copyright (c) 2024 Chiradip Mandal
+
+DB25 SQL Parser Project
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +22,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+
+NOTICE: Arena Allocator Components
+
+The Arena Allocator (include/db25/memory/arena.hpp and src/memory/arena.cpp)
+is marked as FROZEN CODE and requires a formal design change process for any
+modifications. See include/db25/memory/FROZEN_DO_NOT_MODIFY.md for details.
+
+Performance Baseline Requirements:
+- Allocation latency: < 10ns
+- Throughput: > 150M ops/s  
+- Memory efficiency: > 85%
+- Test coverage: > 98%
+
+================================================================================

@@ -1,0 +1,662 @@
+-- ============================================================================
+-- DB25 SQL Parser - Comprehensive Test Suite
+-- ============================================================================
+-- This file contains exhaustive SQL test cases organized by category and complexity.
+-- Each section tests specific parser capabilities.
+-- Format: Each SQL statement should be on its own line (no semicolons needed)
+
+--ID: simple_select_2
+--DESC: SELECT with specific columns
+--LEVEL: SIMPLE
+SELECT id, name, email FROM customers;
+--END
+
+--ID: simple_where_1
+--DESC: SELECT with WHERE clause
+--LEVEL: SIMPLE
+SELECT * FROM products WHERE price > 100;
+--END
+
+--ID: simple_where_2
+--DESC: SELECT with multiple conditions
+--LEVEL: SIMPLE
+SELECT name, age FROM employees 
+WHERE department = 'Engineering' AND age >= 25;
+--END
+
+--ID: simple_join_1
+--DESC: Basic INNER JOIN
+--LEVEL: SIMPLE
+SELECT u.name, o.order_date 
+FROM users u 
+INNER JOIN orders o ON u.id = o.user_id;
+--END
+
+--ID: simple_aggregate_1
+--DESC: Basic aggregation with GROUP BY
+--LEVEL: SIMPLE
+SELECT department, COUNT(*) as employee_count 
+FROM employees 
+GROUP BY department;
+--END
+
+--ID: simple_insert_1
+--DESC: Basic INSERT
+--LEVEL: SIMPLE
+INSERT INTO products (name, price, category) 
+VALUES ('Laptop', 999.99, 'Electronics');
+--END
+
+--ID: simple_update_1
+--DESC: Basic UPDATE
+--LEVEL: SIMPLE
+UPDATE users 
+SET last_login = CURRENT_TIMESTAMP 
+WHERE id = 42;
+--END
+
+--ID: simple_delete_1
+--DESC: Basic DELETE
+--LEVEL: SIMPLE
+DELETE FROM sessions 
+WHERE created_at < '2024-01-01';
+--END
+
+--ID: moderate_subquery_1
+--DESC: Subquery in WHERE clause
+--LEVEL: MODERATE
+SELECT * FROM employees 
+WHERE salary > (SELECT AVG(salary) FROM employees);
+--END
+
+--ID: moderate_join_2
+--DESC: Multiple JOINs
+--LEVEL: MODERATE
+SELECT 
+    c.name AS customer_name,
+    p.name AS product_name,
+    oi.quantity,
+    oi.unit_price
+FROM customers c
+INNER JOIN orders o ON c.id = o.customer_id
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+WHERE o.order_date >= '2024-01-01';
+--END
+
+--ID: moderate_case_1
+--DESC: CASE expression
+--LEVEL: MODERATE
+SELECT 
+    name,
+    salary,
+    CASE 
+        WHEN salary < 50000 THEN 'Junior'
+        WHEN salary BETWEEN 50000 AND 100000 THEN 'Mid-level'
+        WHEN salary > 100000 THEN 'Senior'
+        ELSE 'Unknown'
+    END AS level
+FROM employees;
+--END
+
+--ID: moderate_having_1
+--DESC: GROUP BY with HAVING
+--LEVEL: MODERATE
+SELECT 
+    department,
+    AVG(salary) as avg_salary,
+    COUNT(*) as emp_count
+FROM employees
+GROUP BY department
+HAVING AVG(salary) > 60000 AND COUNT(*) >= 5
+ORDER BY avg_salary DESC;
+--END
+
+--ID: moderate_union_1
+--DESC: UNION of multiple queries
+--LEVEL: MODERATE
+SELECT name, email, 'customer' as type FROM customers
+UNION ALL
+SELECT name, email, 'employee' as type FROM employees
+UNION ALL
+SELECT name, email, 'vendor' as type FROM vendors
+ORDER BY name;
+--END
+
+--ID: complex_cte_1
+--DESC: Common Table Expression
+--LEVEL: COMPLEX
+WITH regional_sales AS (
+    SELECT 
+        region,
+        SUM(sales_amount) as total_sales
+    FROM sales
+    WHERE sale_date >= '2024-01-01'
+    GROUP BY region
+),
+top_regions AS (
+    SELECT region
+    FROM regional_sales
+    WHERE total_sales > (SELECT AVG(total_sales) FROM regional_sales)
+)
+SELECT 
+    s.region,
+    s.product_id,
+    SUM(s.sales_amount) as product_sales
+FROM sales s
+INNER JOIN top_regions t ON s.region = t.region
+GROUP BY s.region, s.product_id;
+--END
+
+--ID: complex_window_1
+--DESC: Window functions
+--LEVEL: COMPLEX
+SELECT 
+    employee_id,
+    department,
+    salary,
+    AVG(salary) OVER (PARTITION BY department) as dept_avg,
+    salary - AVG(salary) OVER (PARTITION BY department) as diff_from_avg,
+    RANK() OVER (PARTITION BY department ORDER BY salary DESC) as salary_rank,
+    LAG(salary, 1) OVER (PARTITION BY department ORDER BY hire_date) as prev_salary,
+    LEAD(salary, 1) OVER (PARTITION BY department ORDER BY hire_date) as next_salary
+FROM employees;
+--END
+
+--ID: complex_recursive_cte
+--DESC: Recursive CTE for hierarchy
+--LEVEL: COMPLEX
+WITH RECURSIVE employee_hierarchy AS (
+    -- Anchor: top-level employees (no manager)
+    SELECT 
+        id, 
+        name, 
+        manager_id, 
+        1 as level,
+        name as path
+    FROM employees
+    WHERE manager_id IS NULL
+    
+    UNION ALL
+    
+    -- Recursive: employees with managers
+    SELECT 
+        e.id,
+        e.name,
+        e.manager_id,
+        h.level + 1,
+        h.path || ' -> ' || e.name
+    FROM employees e
+    INNER JOIN employee_hierarchy h ON e.manager_id = h.id
+    WHERE h.level < 10  -- prevent infinite recursion
+)
+SELECT * FROM employee_hierarchy
+ORDER BY level, name;
+--END
+
+--ID: complex_pivot_1
+--DESC: PIVOT operation (using CASE for compatibility)
+--LEVEL: COMPLEX
+SELECT 
+    product_category,
+    SUM(CASE WHEN EXTRACT(MONTH FROM sale_date) = 1 THEN sales_amount ELSE 0 END) AS jan,
+    SUM(CASE WHEN EXTRACT(MONTH FROM sale_date) = 2 THEN sales_amount ELSE 0 END) AS feb,
+    SUM(CASE WHEN EXTRACT(MONTH FROM sale_date) = 3 THEN sales_amount ELSE 0 END) AS mar,
+    SUM(CASE WHEN EXTRACT(MONTH FROM sale_date) = 4 THEN sales_amount ELSE 0 END) AS apr,
+    SUM(CASE WHEN EXTRACT(MONTH FROM sale_date) = 5 THEN sales_amount ELSE 0 END) AS may,
+    SUM(CASE WHEN EXTRACT(MONTH FROM sale_date) = 6 THEN sales_amount ELSE 0 END) AS jun,
+    SUM(sales_amount) AS total
+FROM sales
+WHERE EXTRACT(YEAR FROM sale_date) = 2024
+GROUP BY product_category
+ORDER BY total DESC;
+--END
+
+--ID: complex_lateral_join
+--DESC: LATERAL JOIN with complex subquery
+--LEVEL: COMPLEX
+SELECT 
+    c.customer_id,
+    c.customer_name,
+    recent_orders.order_id,
+    recent_orders.order_date,
+    recent_orders.total_amount
+FROM customers c
+LEFT JOIN LATERAL (
+    SELECT 
+        o.id as order_id,
+        o.order_date,
+        SUM(oi.quantity * oi.unit_price) as total_amount
+    FROM orders o
+    INNER JOIN order_items oi ON o.id = oi.order_id
+    WHERE o.customer_id = c.customer_id
+    GROUP BY o.id, o.order_date
+    ORDER BY o.order_date DESC
+    LIMIT 5
+) recent_orders ON TRUE
+WHERE c.status = 'active';
+--END
+
+--ID: extreme_analytical_1
+--DESC: Complex analytical query with multiple CTEs and window functions
+--LEVEL: EXTREME
+WITH RECURSIVE date_series AS (
+    SELECT DATE '2024-01-01' as date
+    UNION ALL
+    SELECT date + INTERVAL '1 day'
+    FROM date_series
+    WHERE date < DATE '2024-12-31'
+),
+daily_metrics AS (
+    SELECT 
+        ds.date,
+        COALESCE(COUNT(DISTINCT o.customer_id), 0) as unique_customers,
+        COALESCE(COUNT(o.id), 0) as order_count,
+        COALESCE(SUM(o.total_amount), 0) as revenue,
+        COALESCE(AVG(o.total_amount), 0) as avg_order_value
+    FROM date_series ds
+    LEFT JOIN orders o ON DATE(o.order_date) = ds.date
+    GROUP BY ds.date
+),
+moving_averages AS (
+    SELECT 
+        date,
+        unique_customers,
+        order_count,
+        revenue,
+        avg_order_value,
+        AVG(revenue) OVER (
+            ORDER BY date 
+            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+        ) as revenue_7day_avg,
+        AVG(revenue) OVER (
+            ORDER BY date 
+            ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+        ) as revenue_30day_avg,
+        SUM(revenue) OVER (
+            ORDER BY date 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) as cumulative_revenue,
+        RANK() OVER (ORDER BY revenue DESC) as revenue_rank,
+        NTILE(4) OVER (ORDER BY revenue) as revenue_quartile
+    FROM daily_metrics
+),
+growth_metrics AS (
+    SELECT 
+        date,
+        unique_customers,
+        order_count,
+        revenue,
+        avg_order_value,
+        revenue_7day_avg,
+        revenue_30day_avg,
+        cumulative_revenue,
+        revenue_rank,
+        revenue_quartile,
+        LAG(revenue, 1) OVER (ORDER BY date) as prev_day_revenue,
+        LAG(revenue, 7) OVER (ORDER BY date) as same_day_last_week,
+        LAG(revenue, 30) OVER (ORDER BY date) as same_day_last_month,
+        CASE 
+            WHEN LAG(revenue, 1) OVER (ORDER BY date) > 0 
+            THEN ((revenue - LAG(revenue, 1) OVER (ORDER BY date)) / 
+                  LAG(revenue, 1) OVER (ORDER BY date) * 100)
+            ELSE NULL 
+        END as daily_growth_pct,
+        CASE 
+            WHEN LAG(revenue, 7) OVER (ORDER BY date) > 0 
+            THEN ((revenue - LAG(revenue, 7) OVER (ORDER BY date)) / 
+                  LAG(revenue, 7) OVER (ORDER BY date) * 100)
+            ELSE NULL 
+        END as weekly_growth_pct
+    FROM moving_averages
+)
+SELECT 
+    g.*,
+    CASE 
+        WHEN daily_growth_pct > 10 THEN 'High Growth'
+        WHEN daily_growth_pct > 0 THEN 'Moderate Growth'
+        WHEN daily_growth_pct = 0 THEN 'No Change'
+        WHEN daily_growth_pct > -10 THEN 'Moderate Decline'
+        ELSE 'Significant Decline'
+    END as growth_category,
+    FIRST_VALUE(revenue) OVER (
+        PARTITION BY EXTRACT(MONTH FROM date) 
+        ORDER BY revenue DESC
+    ) as month_peak_revenue,
+    LAST_VALUE(revenue) OVER (
+        PARTITION BY EXTRACT(MONTH FROM date) 
+        ORDER BY revenue DESC
+        RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) as month_min_revenue
+FROM growth_metrics g
+WHERE EXTRACT(DOW FROM date) NOT IN (0, 6)  -- Exclude weekends
+ORDER BY date DESC;
+--END
+
+--ID: extreme_nested_json
+--DESC: Complex query with JSON operations and nested structures
+--LEVEL: EXTREME
+WITH order_details AS (
+    SELECT 
+        o.id,
+        o.customer_id,
+        JSON_BUILD_OBJECT(
+            'order_id', o.id,
+            'order_date', o.order_date,
+            'status', o.status,
+            'items', JSON_AGG(
+                JSON_BUILD_OBJECT(
+                    'product_id', p.id,
+                    'product_name', p.name,
+                    'category', p.category,
+                    'quantity', oi.quantity,
+                    'unit_price', oi.unit_price,
+                    'subtotal', oi.quantity * oi.unit_price,
+                    'discount_pct', COALESCE(oi.discount_pct, 0),
+                    'final_price', oi.quantity * oi.unit_price * (1 - COALESCE(oi.discount_pct, 0) / 100)
+                ) ORDER BY oi.line_number
+            ),
+            'summary', JSON_BUILD_OBJECT(
+                'total_items', COUNT(oi.id),
+                'subtotal', SUM(oi.quantity * oi.unit_price),
+                'total_discount', SUM(oi.quantity * oi.unit_price * COALESCE(oi.discount_pct, 0) / 100),
+                'final_total', SUM(oi.quantity * oi.unit_price * (1 - COALESCE(oi.discount_pct, 0) / 100))
+            )
+        ) as order_json
+    FROM orders o
+    INNER JOIN order_items oi ON o.id = oi.order_id
+    INNER JOIN products p ON oi.product_id = p.id
+    GROUP BY o.id, o.customer_id, o.order_date, o.status
+),
+customer_aggregates AS (
+    SELECT 
+        c.id,
+        c.name,
+        c.email,
+        JSON_BUILD_OBJECT(
+            'customer_info', JSON_BUILD_OBJECT(
+                'id', c.id,
+                'name', c.name,
+                'email', c.email,
+                'registration_date', c.created_at,
+                'tier', c.customer_tier
+            ),
+            'order_history', COALESCE(
+                JSON_AGG(
+                    od.order_json 
+                    ORDER BY (od.order_json->>'order_date')::timestamp DESC
+                ) FILTER (WHERE od.order_json IS NOT NULL),
+                '[]'::json
+            ),
+            'statistics', JSON_BUILD_OBJECT(
+                'total_orders', COUNT(od.id),
+                'lifetime_value', COALESCE(SUM((od.order_json->'summary'->>'final_total')::numeric), 0),
+                'avg_order_value', COALESCE(AVG((od.order_json->'summary'->>'final_total')::numeric), 0),
+                'first_order_date', MIN((od.order_json->>'order_date')::timestamp),
+                'last_order_date', MAX((od.order_json->>'order_date')::timestamp),
+                'days_since_last_order', EXTRACT(DAY FROM (CURRENT_TIMESTAMP - MAX((od.order_json->>'order_date')::timestamp)))
+            )
+        ) as customer_data
+    FROM customers c
+    LEFT JOIN order_details od ON c.id = od.customer_id
+    GROUP BY c.id, c.name, c.email, c.created_at, c.customer_tier
+)
+SELECT 
+    customer_data,
+    CASE 
+        WHEN (customer_data->'statistics'->>'lifetime_value')::numeric > 10000 THEN 'VIP'
+        WHEN (customer_data->'statistics'->>'lifetime_value')::numeric > 5000 THEN 'Premium'
+        WHEN (customer_data->'statistics'->>'lifetime_value')::numeric > 1000 THEN 'Regular'
+        ELSE 'New'
+    END as customer_segment,
+    RANK() OVER (ORDER BY (customer_data->'statistics'->>'lifetime_value')::numeric DESC) as value_rank
+FROM customer_aggregates
+WHERE (customer_data->'statistics'->>'total_orders')::int > 0
+ORDER BY (customer_data->'statistics'->>'lifetime_value')::numeric DESC
+LIMIT 100;
+--END
+
+--ID: extreme_ddl_transaction
+--DESC: Complex DDL with transaction and constraints
+--LEVEL: EXTREME
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+
+-- Create schema with authorization
+CREATE SCHEMA IF NOT EXISTS analytics AUTHORIZATION data_analyst;
+
+-- Create composite type
+CREATE TYPE address_type AS (
+    street VARCHAR(255),
+    city VARCHAR(100),
+    state VARCHAR(50),
+    postal_code VARCHAR(20),
+    country VARCHAR(100)
+);
+
+-- Create main table with multiple constraints
+CREATE TABLE IF NOT EXISTS analytics.customer_profiles (
+    id BIGINT GENERATED ALWAYS AS IDENTITY (
+        INCREMENT BY 1
+        MINVALUE 1
+        MAXVALUE 9223372036854775807
+        START WITH 1000
+        CACHE 10
+    ) PRIMARY KEY,
+    
+    customer_uuid UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
+    
+    -- Personal information
+    first_name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(first_name)) > 0),
+    last_name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(last_name)) > 0),
+    email VARCHAR(255) UNIQUE NOT NULL CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'),
+    phone VARCHAR(20) CHECK (phone ~ '^\+?[1-9]\d{1,14}$'),
+    
+    -- Address information
+    billing_address address_type,
+    shipping_address address_type,
+    
+    -- Account information
+    account_status VARCHAR(20) NOT NULL DEFAULT 'pending' 
+        CHECK (account_status IN ('pending', 'active', 'suspended', 'closed')),
+    customer_tier VARCHAR(20) NOT NULL DEFAULT 'bronze'
+        CHECK (customer_tier IN ('bronze', 'silver', 'gold', 'platinum')),
+    
+    -- Financial information
+    credit_limit DECIMAL(15, 2) DEFAULT 1000.00 CHECK (credit_limit >= 0),
+    current_balance DECIMAL(15, 2) DEFAULT 0.00,
+    
+    -- Metadata
+    metadata JSONB DEFAULT '{}',
+    tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    
+    -- Temporal information
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    
+    -- Computed columns
+    full_name VARCHAR(201) GENERATED ALWAYS AS (first_name || ' ' || last_name) STORED,
+    age_in_days INTEGER GENERATED ALWAYS AS (
+        EXTRACT(DAY FROM (CURRENT_TIMESTAMP - created_at))
+    ) STORED,
+    
+    -- Constraints
+    CONSTRAINT balance_limit_check CHECK (current_balance <= credit_limit),
+    CONSTRAINT valid_deletion CHECK (
+        (deleted_at IS NULL AND account_status != 'closed') OR
+        (deleted_at IS NOT NULL AND account_status = 'closed')
+    ),
+    
+    -- Exclusion constraint (requires btree_gist extension)
+    EXCLUDE USING GIST (
+        email WITH =,
+        tstzrange(created_at, deleted_at) WITH &&
+    ) WHERE (deleted_at IS NULL)
+);
+
+-- Create indexes
+CREATE INDEX idx_customer_email ON analytics.customer_profiles USING HASH (email);
+CREATE INDEX idx_customer_status ON analytics.customer_profiles (account_status) WHERE account_status != 'closed';
+CREATE INDEX idx_customer_tier ON analytics.customer_profiles (customer_tier, credit_limit DESC);
+CREATE INDEX idx_customer_metadata ON analytics.customer_profiles USING GIN (metadata);
+CREATE INDEX idx_customer_tags ON analytics.customer_profiles USING GIN (tags);
+CREATE INDEX idx_customer_full_text ON analytics.customer_profiles 
+    USING GIN (to_tsvector('english', first_name || ' ' || last_name || ' ' || COALESCE(email, '')));
+
+-- Create partial unique index
+CREATE UNIQUE INDEX idx_unique_active_email 
+    ON analytics.customer_profiles (LOWER(email)) 
+    WHERE account_status = 'active' AND deleted_at IS NULL;
+
+-- Create view with security barrier
+CREATE VIEW analytics.active_customers WITH (security_barrier = true) AS
+SELECT 
+    id,
+    customer_uuid,
+    full_name,
+    email,
+    customer_tier,
+    credit_limit,
+    current_balance,
+    created_at
+FROM analytics.customer_profiles
+WHERE account_status = 'active' 
+    AND deleted_at IS NULL
+    AND current_balance < credit_limit * 0.9
+WITH CHECK OPTION;
+
+-- Create materialized view
+CREATE MATERIALIZED VIEW analytics.customer_statistics AS
+SELECT 
+    customer_tier,
+    COUNT(*) as customer_count,
+    AVG(credit_limit) as avg_credit_limit,
+    AVG(current_balance) as avg_balance,
+    MIN(created_at) as first_customer_date,
+    MAX(created_at) as latest_customer_date
+FROM analytics.customer_profiles
+WHERE deleted_at IS NULL
+GROUP BY customer_tier
+WITH DATA;
+
+-- Create trigger function
+CREATE OR REPLACE FUNCTION analytics.update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger
+CREATE TRIGGER trigger_update_timestamp
+    BEFORE UPDATE ON analytics.customer_profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION analytics.update_updated_at();
+
+-- Grant permissions
+GRANT USAGE ON SCHEMA analytics TO data_analyst;
+GRANT SELECT, INSERT, UPDATE ON analytics.customer_profiles TO data_analyst;
+GRANT SELECT ON analytics.active_customers TO data_analyst;
+
+COMMIT;
+--END
+
+--ID: extreme_merge_upsert
+--DESC: Complex MERGE/UPSERT operation
+--LEVEL: EXTREME
+WITH source_data AS (
+    SELECT 
+        s.external_id,
+        s.email,
+        s.first_name,
+        s.last_name,
+        s.phone,
+        MAX(s.credit_score) as credit_score,
+        AVG(s.transaction_amount) as avg_transaction,
+        COUNT(*) as transaction_count,
+        ARRAY_AGG(DISTINCT s.product_category) as categories,
+        JSON_AGG(
+            JSON_BUILD_OBJECT(
+                'date', s.transaction_date,
+                'amount', s.transaction_amount,
+                'category', s.product_category
+            ) ORDER BY s.transaction_date DESC
+        ) as recent_transactions
+    FROM staging_transactions s
+    WHERE s.import_batch_id = (SELECT MAX(import_batch_id) FROM staging_transactions)
+        AND s.is_valid = true
+    GROUP BY s.external_id, s.email, s.first_name, s.last_name, s.phone
+),
+tier_calculation AS (
+    SELECT 
+        *,
+        CASE 
+            WHEN credit_score > 750 AND avg_transaction > 500 THEN 'platinum'
+            WHEN credit_score > 700 AND avg_transaction > 300 THEN 'gold'
+            WHEN credit_score > 650 AND avg_transaction > 150 THEN 'silver'
+            ELSE 'bronze'
+        END as calculated_tier,
+        CASE 
+            WHEN credit_score > 750 THEN avg_transaction * 100
+            WHEN credit_score > 700 THEN avg_transaction * 75
+            WHEN credit_score > 650 THEN avg_transaction * 50
+            ELSE avg_transaction * 25
+        END as calculated_credit_limit
+    FROM source_data
+)
+INSERT INTO analytics.customer_profiles (
+    first_name,
+    last_name,
+    email,
+    phone,
+    customer_tier,
+    credit_limit,
+    metadata
+)
+SELECT 
+    first_name,
+    last_name,
+    LOWER(email),
+    phone,
+    calculated_tier,
+    calculated_credit_limit,
+    JSON_BUILD_OBJECT(
+        'external_id', external_id,
+        'credit_score', credit_score,
+        'import_date', CURRENT_TIMESTAMP,
+        'transaction_history', recent_transactions,
+        'preferred_categories', categories
+    )
+FROM tier_calculation tc
+ON CONFLICT (email) 
+DO UPDATE SET
+    first_name = EXCLUDED.first_name,
+    last_name = EXCLUDED.last_name,
+    phone = COALESCE(EXCLUDED.phone, customer_profiles.phone),
+    customer_tier = CASE 
+        WHEN EXCLUDED.customer_tier IN ('gold', 'platinum') 
+            AND customer_profiles.customer_tier IN ('bronze', 'silver')
+        THEN EXCLUDED.customer_tier
+        ELSE customer_profiles.customer_tier
+    END,
+    credit_limit = GREATEST(customer_profiles.credit_limit, EXCLUDED.credit_limit),
+    metadata = customer_profiles.metadata || EXCLUDED.metadata,
+    updated_at = CURRENT_TIMESTAMP
+WHERE customer_profiles.account_status = 'active'
+    AND (
+        customer_profiles.customer_tier != EXCLUDED.customer_tier
+        OR customer_profiles.credit_limit < EXCLUDED.credit_limit
+        OR customer_profiles.metadata->>'external_id' != EXCLUDED.metadata->>'external_id'
+    )
+RETURNING 
+    id,
+    email,
+    full_name,
+    customer_tier,
+    credit_limit,
+    CASE 
+        WHEN xmax = 0 THEN 'inserted'
+        ELSE 'updated'
+    END as operation;
+--END
