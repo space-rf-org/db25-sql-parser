@@ -42,7 +42,7 @@ ast::ASTNode* Parser::parse_create_stmt() {
                 return nullptr;
             }
         }
-        // Now we're at TABLE - use three-tier architecture
+        // Now we're at TABLE - use implementation to parse columns
         auto* result = parse_create_table_impl();
         if (result && is_temp) {
             result->semantic_flags |= 0x08;  // TEMPORARY flag
@@ -99,61 +99,6 @@ ast::ASTNode* Parser::parse_create_table_stmt() {
     return parse_create_table_impl();
 }
 
-ast::ASTNode* Parser::parse_create_table_impl() {
-    // Third tier - implementation that expects to be at TABLE keyword
-    // We're at TABLE keyword
-    advance();  // Skip TABLE
-    
-    // Create the CREATE TABLE node here
-    // The _full function is kept for backward compatibility but
-    // this _impl function handles the core parsing
-    auto* create_node = arena_.allocate<ast::ASTNode>();
-    new (create_node) ast::ASTNode(ast::NodeType::CreateTableStmt);
-    create_node->node_id = next_node_id_++;
-    
-    // Check for IF NOT EXISTS
-    if (current_token_ && current_token_->keyword_id == db25::Keyword::IF) {
-        advance();
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::NOT) {
-            advance();
-            if (current_token_ && current_token_->keyword_id == db25::Keyword::EXISTS) {
-                advance();
-                create_node->semantic_flags |= 0x01;  // IF NOT EXISTS flag
-            }
-        }
-    }
-    
-    // Get table name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        std::string_view first_name = current_token_->value;
-        advance();
-        
-        if (current_token_ && current_token_->value == ".") {
-            advance(); // consume dot
-            if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-                create_node->schema_name = copy_to_arena(first_name);
-                create_node->primary_text = copy_to_arena(current_token_->value);
-                advance();
-            }
-        } else {
-            create_node->primary_text = copy_to_arena(first_name);
-        }
-    }
-    
-    // Parse column definitions - delegate to full implementation
-    if (current_token_ && current_token_->value == "(") {
-        // Parse columns and constraints (simplified for now)
-        int paren_depth = 1;
-        advance();
-        while (current_token_ && paren_depth > 0) {
-            if (current_token_->value == "(") paren_depth++;
-            else if (current_token_->value == ")") paren_depth--;
-            advance();
-        }
-    }
-    
-    return create_node;
-}
 
 ast::ASTNode* Parser::parse_create_index_stmt() {
     // Entry point for standalone parse_create_index_stmt calls
@@ -428,7 +373,7 @@ ast::ASTNode* Parser::parse_data_type() {
         } else if (current_token_->value == "DECIMAL" || current_token_->value == "NUMERIC") {
             type_node->data_type = ast::DataType::Decimal;
             type_node->primary_text = copy_to_arena("DECIMAL");
-        } else if (current_token_->value == "INTERVAL") {
+        } else if (keyword_id == db25::Keyword::INTERVAL) {
             type_node->data_type = ast::DataType::Interval;
             type_node->primary_text = copy_to_arena("INTERVAL");
         } else if (current_token_->value == "JSON" || current_token_->value == "JSONB") {
@@ -782,7 +727,7 @@ ast::ASTNode* Parser::parse_table_constraint() {
 }
 
 // Improved CREATE TABLE implementation
-ast::ASTNode* Parser::parse_create_table_full() {
+ast::ASTNode* Parser::parse_create_table_impl() {
     if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
     
     // We're at TABLE keyword
