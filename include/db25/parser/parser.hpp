@@ -218,8 +218,7 @@ protected:  // Changed from private to allow friend class access
     [[nodiscard]] ast::ASTNode* parse_delete_stmt();
     [[nodiscard]] ast::ASTNode* parse_create_stmt();  // Dispatches to specific CREATE
     [[nodiscard]] ast::ASTNode* parse_create_table_stmt();
-    [[nodiscard]] ast::ASTNode* parse_create_table_impl();  // Implementation helper
-    [[nodiscard]] ast::ASTNode* parse_create_table_full();  // Full implementation with columns
+    [[nodiscard]] ast::ASTNode* parse_create_table_impl();  // Implementation with column parsing
     [[nodiscard]] ast::ASTNode* parse_create_index_stmt();
     [[nodiscard]] ast::ASTNode* parse_create_index_impl();  // Implementation helper
     [[nodiscard]] ast::ASTNode* parse_create_index_full();  // Full implementation with options
