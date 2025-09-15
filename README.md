@@ -35,7 +35,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/DB25-parser2.git
+git clone https://github.com/yourusername/db25-sql-parser.git
 cd DB25-parser2
 
 # Build (clean build from scratch)
