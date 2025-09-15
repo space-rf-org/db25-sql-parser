@@ -35,8 +35,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/db25-sql-parser.git
-cd DB25-parser2
+git clone https://github.com/space-rf-org/db25-sql-parser.git
+cd db25-sql-parser
 
 # Build (clean build from scratch)
 mkdir -p build && cd build
@@ -170,7 +170,7 @@ Abstract Syntax Tree:
 ## Project Structure
 
 ```
-DB25-parser2/
+db25-sql-parser/
 ├── include/db25/         # Public headers
 │   ├── ast/             # AST node definitions
 │   ├── parser/          # Parser interface
@@ -309,8 +309,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- 🐛 [Report Issues](https://github.com/yourusername/DB25-parser2/issues)
-- 💡 [Request Features](https://github.com/yourusername/DB25-parser2/issues)
+- 🐛 [Report Issues](https://github.com/space-rf-org/db25-sql-parser/issues)
+- 💡 [Request Features](https://github.com/space-rf-org/db25-sql-parser/issues)
 - 📧 Contact: your.email@example.com
 
 ---
