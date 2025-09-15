@@ -27,7 +27,11 @@
 
 ### Prerequisites
 
-- C++23 compatible compiler (GCC 13+, Clang 15+, or MSVC 2022+)
+- C++23 compatible compiler:
+  - Apple Clang 16.0+ (for deducing this support)
+  - GCC 13+
+  - Clang 16+
+  - MSVC 2022+ (v19.32+)
 - CMake 3.20 or higher
 - SIMD support (SSE4.2 minimum, AVX2 recommended)
 
@@ -265,7 +269,7 @@ We welcome contributions! Please see our [Developer Guide](docs/DEVELOPER_GUIDE.
 
 ```
 System: Apple M1 Pro, 32GB RAM
-Compiler: Clang 15.0.0
+Compiler: Apple Clang 17.0.0
 Build: Release with -O3 -march=native
 
 Tokenization Performance:
