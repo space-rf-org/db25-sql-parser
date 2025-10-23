@@ -315,7 +315,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - 🐛 [Report Issues](https://github.com/space-rf-org/db25-sql-parser/issues)
 - 💡 [Request Features](https://github.com/space-rf-org/db25-sql-parser/issues)
-- 📧 Contact: your.email@example.com
+- 📧 Contact: chiradip@chiradip.com
 
 ---
 
