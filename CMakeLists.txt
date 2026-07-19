@@ -252,16 +252,35 @@ if(BUILD_BENCHMARKS)
 endif()
 
 # Installation
+include(GNUInstallDirs)
+
 install(TARGETS db25parser
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
+    EXPORT DB25ParserTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-install(DIRECTORY include/ DESTINATION include)
+# Public headers: the parser's own headers plus the tokenizer headers that the
+# public API (parser.hpp -> tokenizer_adapter.hpp) includes. Both land under the
+# same include prefix so #include "simd_tokenizer.hpp" resolves for consumers.
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY ${TOKENIZER_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# Export the target so downstream projects can use find_package(DB25Parser).
+install(EXPORT DB25ParserTargets
+    FILE DB25ParserTargets.cmake
+    NAMESPACE DB25::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DB25Parser
+)
 
 # Package configuration
 include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DB25ParserConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DB25Parser
+)
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
@@ -269,6 +288,7 @@ write_basic_package_version_file(
 )
 
 install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfigVersion.cmake"
-    DESTINATION lib/cmake/DB25Parser
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DB25Parser
 )
