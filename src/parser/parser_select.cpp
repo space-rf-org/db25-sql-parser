@@ -746,27 +746,53 @@ ast::ASTNode* Parser::parse_join_clause() {
                 join_node->child_count++;
             }
         }
-        // Could also have USING clause
+        // Or a USING ( col [, col]* ) join column list. This is distinct from
+        // the DELETE/UPDATE USING table list (parse_using_clause); here USING
+        // takes a parenthesized list of shared column names.
         else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
                  current_token_->keyword_id == db25::Keyword::USING) {
-            // Parse USING clause for JOIN
             advance(); // consume USING
-            auto* using_clause = parse_using_clause();
-            if (using_clause) {
+            if (current_token_ && current_token_->value == "(") {
+                advance(); // consume '('
+                parenthesis_depth_++;
+
+                auto* using_clause = arena_.allocate<ast::ASTNode>();
+                new (using_clause) ast::ASTNode(ast::NodeType::UsingClause);
+                using_clause->node_id = next_node_id_++;
                 using_clause->parent = join_node;
-                if (join_node->first_child) {
-                    // Add as second child after the joined table
-                    auto* first = join_node->first_child;
-                    if (first->next_sibling) {
-                        // Replace ON condition with USING
-                        using_clause->next_sibling = first->next_sibling->next_sibling;
-                        first->next_sibling = using_clause;
+
+                ast::ASTNode* first_col = nullptr;
+                ast::ASTNode* last_col = nullptr;
+                while (current_token_ &&
+                       current_token_->type == tokenizer::TokenType::Identifier) {
+                    auto* col = arena_.allocate<ast::ASTNode>();
+                    new (col) ast::ASTNode(ast::NodeType::ColumnRef);
+                    col->node_id = next_node_id_++;
+                    col->primary_text = copy_to_arena(current_token_->value);
+                    col->parent = using_clause;
+                    if (!first_col) {
+                        first_col = col;
+                        using_clause->first_child = col;
                     } else {
-                        first->next_sibling = using_clause;
+                        last_col->next_sibling = col;
                     }
-                } else {
-                    join_node->first_child = using_clause;
+                    last_col = col;
+                    using_clause->child_count++;
+                    advance();
+                    if (current_token_ && current_token_->value == ",") {
+                        advance();
+                    } else {
+                        break;
+                    }
                 }
+
+                if (current_token_ && current_token_->value == ")") {
+                    if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                    advance();
+                }
+
+                // Attach as the second child, after the joined table.
+                table->next_sibling = using_clause;
                 join_node->child_count++;
             }
         }
@@ -1286,47 +1312,90 @@ ast::ASTNode* Parser::parse_table_reference() {
     if (!current_token_) {
         return nullptr;
     }
-    
-    // Parse simple table name
-    if (current_token_->type == tokenizer::TokenType::Identifier) {
+
+    ast::ASTNode* ref_node = nullptr;
+
+    // Derived table: ( SELECT ... ) or ( WITH ... ) with a required alias.
+    // Only treat '(' as a table reference when it introduces a subquery; a
+    // plain grouped expression is not valid in a FROM/JOIN position here.
+    if (current_token_->type == tokenizer::TokenType::Delimiter &&
+        current_token_->value == "(" &&
+        peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword &&
+        (peek_token_->keyword_id == db25::Keyword::SELECT ||
+         peek_token_->keyword_id == db25::Keyword::WITH)) {
+        advance();               // consume '('
+        parenthesis_depth_++;
+
+        auto* subquery_node = arena_.allocate<ast::ASTNode>();
+        new (subquery_node) ast::ASTNode(ast::NodeType::Subquery);
+        subquery_node->node_id = next_node_id_++;
+        subquery_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::IsSubquery);
+
+        push_context(ParseContext::SUBQUERY);
+        auto* inner = (current_token_ &&
+                       current_token_->type == tokenizer::TokenType::Keyword &&
+                       current_token_->keyword_id == db25::Keyword::WITH)
+                          ? parse_with_statement()
+                          : parse_select_stmt();
+        pop_context();
+        if (inner) {
+            inner->parent = subquery_node;
+            subquery_node->first_child = inner;
+            subquery_node->child_count = 1;
+        }
+
+        // Consume closing ')'
+        if (current_token_ && current_token_->value == ")") {
+            if (parenthesis_depth_ > 0) parenthesis_depth_--;
+            advance();
+        }
+
+        ref_node = subquery_node;
+    }
+    // Simple table name
+    else if (current_token_->type == tokenizer::TokenType::Identifier) {
         auto* table_node = arena_.allocate<ast::ASTNode>();
         new (table_node) ast::ASTNode(ast::NodeType::TableRef);
         table_node->node_id = next_node_id_++;
-        
+
         // Store table name
         table_node->primary_text = copy_to_arena(current_token_->value);
-        
+
         advance();
-        
-        // Check for alias (AS keyword is optional)
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-            current_token_->keyword_id == db25::Keyword::AS) {
-            advance();
-        }
-        
-        // Check for alias identifier
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier &&
-            // Make sure it's not a keyword that could follow
-            current_token_->value != "WHERE" && current_token_->value != "where" &&
-            current_token_->value != "JOIN" && current_token_->value != "join" &&
-            current_token_->value != "LEFT" && current_token_->value != "left" &&
-            current_token_->value != "RIGHT" && current_token_->value != "right" &&
-            current_token_->value != "INNER" && current_token_->value != "inner" &&
-            current_token_->value != "FULL" && current_token_->value != "full" &&
-            current_token_->value != "CROSS" && current_token_->value != "cross" &&
-            current_token_->value != "ON" && current_token_->value != "on" &&
-            current_token_->value != "GROUP" && current_token_->value != "group" &&
-            current_token_->value != "ORDER" && current_token_->value != "order") {
-            // Store alias in schema_name field (repurposed for alias)
-            table_node->schema_name = copy_to_arena(current_token_->value);
-            table_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::HasAlias);
-            advance();
-        }
-        
-        return table_node;
+        ref_node = table_node;
     }
-    
-    return nullptr;
+
+    if (!ref_node) {
+        return nullptr;
+    }
+
+    // Optional alias (AS keyword is optional), shared by table refs and
+    // derived tables. Stored in schema_name (repurposed for alias).
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        current_token_->keyword_id == db25::Keyword::AS) {
+        advance();
+    }
+
+    // Check for alias identifier
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier &&
+        // Make sure it's not a keyword that could follow
+        current_token_->value != "WHERE" && current_token_->value != "where" &&
+        current_token_->value != "JOIN" && current_token_->value != "join" &&
+        current_token_->value != "LEFT" && current_token_->value != "left" &&
+        current_token_->value != "RIGHT" && current_token_->value != "right" &&
+        current_token_->value != "INNER" && current_token_->value != "inner" &&
+        current_token_->value != "FULL" && current_token_->value != "full" &&
+        current_token_->value != "CROSS" && current_token_->value != "cross" &&
+        current_token_->value != "ON" && current_token_->value != "on" &&
+        current_token_->value != "GROUP" && current_token_->value != "group" &&
+        current_token_->value != "ORDER" && current_token_->value != "order") {
+        // Store alias in schema_name field (repurposed for alias)
+        ref_node->schema_name = copy_to_arena(current_token_->value);
+        ref_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::HasAlias);
+        advance();
+    }
+
+    return ref_node;
 }
 
 // ========== Column Reference Parser ==========
