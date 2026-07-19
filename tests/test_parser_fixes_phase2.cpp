@@ -105,10 +105,11 @@ TEST_F(ParserFixesPhase2Test, WindowFrameBoundaries) {
         if (node->node_type == NodeType::WindowSpec) {
             window_specs++;
         } else if (node->node_type == NodeType::FrameBound) {
-            // Check schema_name for PRECEDING/FOLLOWING
-            if (node->schema_name == "PRECEDING") {
+            // Direction is recorded in semantic_flags (see FrameBoundFlags);
+            // the full bound text lives in primary_text.
+            if (node->semantic_flags & ast::FrameBoundPreceding) {
                 preceding_bounds++;
-            } else if (node->schema_name == "FOLLOWING") {
+            } else if (node->semantic_flags & ast::FrameBoundFollowing) {
                 following_bounds++;
             }
             // Check primary_text for CURRENT ROW
@@ -156,9 +157,13 @@ TEST_F(ParserFixesPhase2Test, UnboundedFrameBoundaries) {
         if (!node) return;
         
         if (node->node_type == NodeType::FrameBound) {
-            if (node->primary_text == "UNBOUNDED" && node->schema_name == "PRECEDING") {
+            // "UNBOUNDED PRECEDING" / "UNBOUNDED FOLLOWING" fold the direction
+            // into primary_text; direction is also flagged in semantic_flags.
+            if (node->primary_text == "UNBOUNDED PRECEDING" &&
+                (node->semantic_flags & ast::FrameBoundPreceding)) {
                 unbounded_preceding++;
-            } else if (node->primary_text == "UNBOUNDED" && node->schema_name == "FOLLOWING") {
+            } else if (node->primary_text == "UNBOUNDED FOLLOWING" &&
+                       (node->semantic_flags & ast::FrameBoundFollowing)) {
                 unbounded_following++;
             }
         }

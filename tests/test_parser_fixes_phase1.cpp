@@ -261,17 +261,15 @@ TEST_F(ParserFixesPhase1Test, WindowFrameBoundaries) {
         if (node->node_type == NodeType::WindowSpec) {
             window_specs++;
             
-            // Look for frame bounds
+            // Look for frame bounds. Direction is recorded in semantic_flags
+            // (FrameBoundFlags); the full bound text lives in primary_text.
             for (auto* child = node->first_child; child; child = child->next_sibling) {
-                if (node->node_type == NodeType::FrameBound ||
-                    node->node_type == NodeType::FrameClause) {
-                    // Check if PRECEDING or FOLLOWING is captured
-                    if (node->primary_text.find("PRECEDING") != std::string::npos ||
-                        node->schema_name == "PRECEDING") {
+                if (child->node_type == NodeType::FrameBound ||
+                    child->node_type == NodeType::FrameClause) {
+                    if (child->semantic_flags & ast::FrameBoundPreceding) {
                         preceding_found++;
                     }
-                    if (node->primary_text.find("FOLLOWING") != std::string::npos ||
-                        node->schema_name == "FOLLOWING") {
+                    if (child->semantic_flags & ast::FrameBoundFollowing) {
                         following_found++;
                     }
                 }

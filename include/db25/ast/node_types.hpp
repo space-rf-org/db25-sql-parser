@@ -322,6 +322,22 @@ enum class DataType : uint8_t {
 };
 
 /**
+ * Frame-bound direction flags (window FrameClause bounds).
+ *
+ * Stored in ASTNode::semantic_flags on FrameBound nodes to record the bound's
+ * direction in a machine-readable way. The full human-readable bound text
+ * (e.g. "UNBOUNDED PRECEDING", "5 FOLLOWING", "CURRENT ROW") lives in
+ * primary_text. These flags replace the previous overload that stored the
+ * "PRECEDING"/"FOLLOWING" keyword in schema_name, which is reserved for name
+ * qualifiers / aliases (see docs/AST_NOTES.md).
+ */
+enum FrameBoundFlags : uint16_t {
+    FrameBoundPreceding = 0x0001,  // bound is a PRECEDING bound
+    FrameBoundFollowing = 0x0002   // bound is a FOLLOWING bound
+    // (neither set => CURRENT ROW / bare UNBOUNDED)
+};
+
+/**
  * Convert enum to string for debugging
  * Using C++23 constexpr improvements
  */
