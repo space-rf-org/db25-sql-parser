@@ -24,19 +24,31 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(
         -Wall -Wextra -Wpedantic
-        -march=native
         -fno-exceptions  # We use Result types instead
     )
-    
+
     # Config-specific flags
     set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-    
+
     # SIMD detection
     include(CheckCXXCompilerFlag)
     check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
     check_cxx_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
-    
+
+    # Portability: the SIMD tokenizer selects SSE4.2/AVX2/AVX-512 at runtime and
+    # its intrinsic functions carry their own target attributes, so a global
+    # -march=native is NOT required to compile them. Building with -march=native
+    # would instead produce non-portable binaries (auto-vectorised, always-run
+    # code using the build machine's ISA can SIGILL on older CPUs). Default to a
+    # conservative SSE4.2 baseline; make -march=native an explicit opt-in.
+    option(ENABLE_NATIVE "Optimize for the build machine's CPU (-march=native, non-portable binaries)" OFF)
+    if(ENABLE_NATIVE)
+        add_compile_options(-march=native)
+    elseif(COMPILER_SUPPORTS_SSE42)
+        add_compile_options(-msse4.2)  # portable baseline floor
+    endif()
+
     if(COMPILER_SUPPORTS_AVX2)
         add_compile_definitions(DB25_HAS_AVX2)
     elseif(COMPILER_SUPPORTS_SSE42)
