@@ -88,9 +88,14 @@ void print_node(const ASTNode* node, int depth = 0) {
         }
     }
     
-    // Frame boundaries
-    if (node->node_type == NodeType::FrameBound && !node->schema_name.empty()) {
-        std::cout << " " << node->schema_name;
+    // Frame boundaries: direction now lives in semantic_flags (FrameBoundFlags),
+    // with the full bound text in primary_text.
+    if (node->node_type == NodeType::FrameBound) {
+        if (node->semantic_flags & ast::FrameBoundPreceding) {
+            std::cout << " [PRECEDING]";
+        } else if (node->semantic_flags & ast::FrameBoundFollowing) {
+            std::cout << " [FOLLOWING]";
+        }
     }
     
     std::cout << std::endl;

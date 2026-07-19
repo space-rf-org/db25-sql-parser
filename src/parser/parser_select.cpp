@@ -1712,10 +1712,11 @@ ast::ASTNode* Parser::parse_window_spec() {
                 current_token_->keyword_id == db25::Keyword::UNBOUNDED) {
                 frame_start->primary_text = copy_to_arena("UNBOUNDED");
                 advance(); // consume UNBOUNDED
-                
+
                 if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
                     current_token_->keyword_id == db25::Keyword::PRECEDING) {
-                    frame_start->schema_name = copy_to_arena("PRECEDING");
+                    frame_start->primary_text = copy_to_arena("UNBOUNDED PRECEDING");
+                    frame_start->semantic_flags |= ast::FrameBoundPreceding;
                     advance(); // consume PRECEDING
                 }
             } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
@@ -1759,10 +1760,14 @@ ast::ASTNode* Parser::parse_window_spec() {
                 // Parse PRECEDING/FOLLOWING
                 if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
                     if (current_token_->keyword_id == db25::Keyword::PRECEDING) {
-                        frame_start->schema_name = copy_to_arena("PRECEDING");
+                        frame_start->primary_text =
+                            copy_to_arena(std::string(frame_start->primary_text) + " PRECEDING");
+                        frame_start->semantic_flags |= ast::FrameBoundPreceding;
                         advance();
                     } else if (current_token_->keyword_id == db25::Keyword::FOLLOWING) {
-                        frame_start->schema_name = copy_to_arena("FOLLOWING");
+                        frame_start->primary_text =
+                            copy_to_arena(std::string(frame_start->primary_text) + " FOLLOWING");
+                        frame_start->semantic_flags |= ast::FrameBoundFollowing;
                         advance();
                     }
                 }
@@ -1786,10 +1791,11 @@ ast::ASTNode* Parser::parse_window_spec() {
                     current_token_->keyword_id == db25::Keyword::UNBOUNDED) {
                     frame_end->primary_text = copy_to_arena("UNBOUNDED");
                     advance(); // consume UNBOUNDED
-                    
+
                     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
                         current_token_->keyword_id == db25::Keyword::FOLLOWING) {
-                        frame_end->schema_name = copy_to_arena("FOLLOWING");
+                        frame_end->primary_text = copy_to_arena("UNBOUNDED FOLLOWING");
+                        frame_end->semantic_flags |= ast::FrameBoundFollowing;
                         advance(); // consume FOLLOWING
                     }
                 } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
@@ -1833,10 +1839,14 @@ ast::ASTNode* Parser::parse_window_spec() {
                     // Parse PRECEDING/FOLLOWING
                     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
                         if (current_token_->keyword_id == db25::Keyword::PRECEDING) {
-                            frame_end->schema_name = copy_to_arena("PRECEDING");
+                            frame_end->primary_text =
+                                copy_to_arena(std::string(frame_end->primary_text) + " PRECEDING");
+                            frame_end->semantic_flags |= ast::FrameBoundPreceding;
                             advance();
                         } else if (current_token_->keyword_id == db25::Keyword::FOLLOWING) {
-                            frame_end->schema_name = copy_to_arena("FOLLOWING");
+                            frame_end->primary_text =
+                                copy_to_arena(std::string(frame_end->primary_text) + " FOLLOWING");
+                            frame_end->semantic_flags |= ast::FrameBoundFollowing;
                             advance();
                         }
                     }

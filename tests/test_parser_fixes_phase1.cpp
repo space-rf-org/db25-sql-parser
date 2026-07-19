@@ -261,17 +261,15 @@ TEST_F(ParserFixesPhase1Test, WindowFrameBoundaries) {
         if (node->node_type == NodeType::WindowSpec) {
             window_specs++;
             
-            // Look for frame bounds
+            // Look for frame bounds. Direction is recorded in semantic_flags
+            // (FrameBoundFlags); the full bound text lives in primary_text.
             for (auto* child = node->first_child; child; child = child->next_sibling) {
-                if (node->node_type == NodeType::FrameBound ||
-                    node->node_type == NodeType::FrameClause) {
-                    // Check if PRECEDING or FOLLOWING is captured
-                    if (node->primary_text.find("PRECEDING") != std::string::npos ||
-                        node->schema_name == "PRECEDING") {
+                if (child->node_type == NodeType::FrameBound ||
+                    child->node_type == NodeType::FrameClause) {
+                    if (child->semantic_flags & ast::FrameBoundPreceding) {
                         preceding_found++;
                     }
-                    if (node->primary_text.find("FOLLOWING") != std::string::npos ||
-                        node->schema_name == "FOLLOWING") {
+                    if (child->semantic_flags & ast::FrameBoundFollowing) {
                         following_found++;
                     }
                 }
@@ -334,6 +332,96 @@ TEST_F(ParserFixesPhase1Test, TableAliases) {
     EXPECT_EQ(table_refs, 3) << "Should find 3 table references";
     // Aliases should be captured somehow
     // The exact assertion depends on implementation
+}
+
+// Test 7b: NodeFlags::HasAlias must be reliably set on aliased references and
+// must NOT be set when there is no alias. Downstream (semantic analyzer) relies
+// on this flag being trustworthy.
+TEST_F(ParserFixesPhase1Test, HasAliasFlagIntegrity) {
+    constexpr uint16_t kHasAlias = static_cast<uint16_t>(NodeFlags::HasAlias);
+    auto has_alias = [](const ASTNode* n) {
+        return (n->semantic_flags & static_cast<uint16_t>(NodeFlags::HasAlias)) != 0;
+    };
+
+    // Generic depth-first search for the first node matching a predicate.
+    std::function<const ASTNode*(const ASTNode*, std::function<bool(const ASTNode*)>)>
+        find = [&](const ASTNode* node,
+                   std::function<bool(const ASTNode*)> pred) -> const ASTNode* {
+        if (!node) return nullptr;
+        if (pred(node)) return node;
+        for (auto* c = node->first_child; c; c = c->next_sibling) {
+            if (auto* hit = find(c, pred)) return hit;
+        }
+        return nullptr;
+    };
+
+    // 1. Aliased table reference: FROM users u
+    {
+        auto r = parser.parse("SELECT * FROM users u");
+        ASSERT_TRUE(r.has_value());
+        const ASTNode* tref = find(r.value(), [](const ASTNode* n) {
+            return n->node_type == NodeType::TableRef && n->primary_text == "users";
+        });
+        ASSERT_NE(tref, nullptr);
+        EXPECT_EQ(tref->schema_name, "u");
+        EXPECT_TRUE(has_alias(tref)) << "aliased table ref must set HasAlias";
+    }
+
+    // 2. Non-aliased table reference: FROM users  (flag must NOT be set)
+    {
+        auto r = parser.parse("SELECT * FROM users");
+        ASSERT_TRUE(r.has_value());
+        const ASTNode* tref = find(r.value(), [](const ASTNode* n) {
+            return n->node_type == NodeType::TableRef && n->primary_text == "users";
+        });
+        ASSERT_NE(tref, nullptr);
+        EXPECT_TRUE(tref->schema_name.empty());
+        EXPECT_FALSE(has_alias(tref)) << "non-aliased table ref must NOT set HasAlias";
+    }
+
+    // 3. SELECT-item AS alias: SELECT id AS the_id
+    {
+        auto r = parser.parse("SELECT id AS the_id FROM t");
+        ASSERT_TRUE(r.has_value());
+        const ASTNode* item = find(r.value(), [](const ASTNode* n) {
+            return n->schema_name == "the_id";
+        });
+        ASSERT_NE(item, nullptr);
+        EXPECT_TRUE(has_alias(item)) << "aliased select item must set HasAlias";
+    }
+
+    // 4. Derived-table (subquery) alias: FROM (SELECT ...) sub
+    {
+        auto r = parser.parse("SELECT sub.id FROM (SELECT id FROM t) sub");
+        ASSERT_TRUE(r.has_value());
+        const ASTNode* dt = find(r.value(), [](const ASTNode* n) {
+            return n->node_type == NodeType::Subquery && n->schema_name == "sub";
+        });
+        ASSERT_NE(dt, nullptr);
+        EXPECT_TRUE(has_alias(dt)) << "aliased derived table must set HasAlias";
+    }
+
+    // 5. JOIN with aliases on both sides.
+    {
+        auto r = parser.parse(
+            "SELECT * FROM users u JOIN orders o ON u.id = o.user_id");
+        ASSERT_TRUE(r.has_value());
+        int aliased_tables = 0;
+        std::function<void(const ASTNode*)> walk = [&](const ASTNode* n) {
+            if (!n) return;
+            if (n->node_type == NodeType::TableRef && !n->schema_name.empty()) {
+                EXPECT_TRUE(has_alias(n))
+                    << "joined table '" << n->primary_text << "' aliased '"
+                    << n->schema_name << "' must set HasAlias";
+                aliased_tables++;
+            }
+            for (auto* c = n->first_child; c; c = c->next_sibling) walk(c);
+        };
+        walk(r.value());
+        EXPECT_EQ(aliased_tables, 2) << "both joined tables are aliased";
+    }
+
+    (void)kHasAlias;
 }
 
 // Test 8: Column references should use ColumnRef not Identifier

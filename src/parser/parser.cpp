@@ -140,11 +140,16 @@ ParseResult Parser::parse(std::string_view sql) {
         });
     }
     
-    // Don't delete tokenizer on success - the AST nodes have string_views
-    // pointing to the tokenizer's memory. The tokenizer will be deleted
-    // when the parser is destroyed or reset() is called.
-    // delete tokenizer_;  // KEEP ALIVE for AST string_views
-    // tokenizer_ = nullptr;
+    // All AST node strings are copied into the parser's arena via
+    // copy_to_arena(), so they no longer alias the tokenizer's token buffer.
+    // The tokenizer can therefore be released here (matching the error paths)
+    // without dangling any string_view on the returned AST. The AST's string
+    // lifetime is now tied solely to the arena (i.e. the Parser instance),
+    // independent of the tokenizer.
+    delete tokenizer_;
+    tokenizer_ = nullptr;
+    current_token_ = nullptr;
+    peek_token_ = nullptr;
     return root;
 }
 
@@ -205,7 +210,13 @@ Parser::parse_script(std::string_view sql) {
         }
     }
     
-    // Keep tokenizer alive - AST nodes have string_views pointing to it
+    // AST node strings are arena-owned (copied via copy_to_arena), so they do
+    // not alias the tokenizer buffer. Release the tokenizer here; the returned
+    // AST remains valid for the lifetime of the arena / Parser instance.
+    delete tokenizer_;
+    tokenizer_ = nullptr;
+    current_token_ = nullptr;
+    peek_token_ = nullptr;
     return statements;
 }
 
