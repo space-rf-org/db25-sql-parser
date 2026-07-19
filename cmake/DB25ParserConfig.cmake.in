@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# Exported target: DB25::db25parser (static library; the tokenizer and arena
+# sources are compiled into it, so no transitive package dependencies).
+include("${CMAKE_CURRENT_LIST_DIR}/DB25ParserTargets.cmake")
+
+check_required_components(DB25Parser)

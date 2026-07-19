@@ -24,19 +24,31 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(
         -Wall -Wextra -Wpedantic
-        -march=native
         -fno-exceptions  # We use Result types instead
     )
-    
+
     # Config-specific flags
     set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-    
+
     # SIMD detection
     include(CheckCXXCompilerFlag)
     check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
     check_cxx_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
-    
+
+    # Portability: the SIMD tokenizer selects SSE4.2/AVX2/AVX-512 at runtime and
+    # its intrinsic functions carry their own target attributes, so a global
+    # -march=native is NOT required to compile them. Building with -march=native
+    # would instead produce non-portable binaries (auto-vectorised, always-run
+    # code using the build machine's ISA can SIGILL on older CPUs). Default to a
+    # conservative SSE4.2 baseline; make -march=native an explicit opt-in.
+    option(ENABLE_NATIVE "Optimize for the build machine's CPU (-march=native, non-portable binaries)" OFF)
+    if(ENABLE_NATIVE)
+        add_compile_options(-march=native)
+    elseif(COMPILER_SUPPORTS_SSE42)
+        add_compile_options(-msse4.2)  # portable baseline floor
+    endif()
+
     if(COMPILER_SUPPORTS_AVX2)
         add_compile_definitions(DB25_HAS_AVX2)
     elseif(COMPILER_SUPPORTS_SSE42)
@@ -252,16 +264,35 @@ if(BUILD_BENCHMARKS)
 endif()
 
 # Installation
+include(GNUInstallDirs)
+
 install(TARGETS db25parser
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
+    EXPORT DB25ParserTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-install(DIRECTORY include/ DESTINATION include)
+# Public headers: the parser's own headers plus the tokenizer headers that the
+# public API (parser.hpp -> tokenizer_adapter.hpp) includes. Both land under the
+# same include prefix so #include "simd_tokenizer.hpp" resolves for consumers.
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY ${TOKENIZER_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# Export the target so downstream projects can use find_package(DB25Parser).
+install(EXPORT DB25ParserTargets
+    FILE DB25ParserTargets.cmake
+    NAMESPACE DB25::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DB25Parser
+)
 
 # Package configuration
 include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DB25ParserConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DB25Parser
+)
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
@@ -269,6 +300,7 @@ write_basic_package_version_file(
 )
 
 install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/DB25ParserConfigVersion.cmake"
-    DESTINATION lib/cmake/DB25Parser
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DB25Parser
 )

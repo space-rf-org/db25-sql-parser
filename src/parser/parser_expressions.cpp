@@ -200,16 +200,48 @@ ast::ASTNode* Parser::parse_primary_expression() {
             
             return subquery_node;
         } else {
-            // It's a grouped expression
-            auto* expr = parse_expression(0);
-            
+            // Grouped expression, or a row/tuple constructor "( expr, expr, ... )"
+            auto* first = parse_expression(0);
+
+            // Row constructor: a comma after the first expression means this is
+            // a parenthesised expression list, not a simple grouping.
+            if (current_token_ && current_token_->value == ",") {
+                auto* row_node = arena_.allocate<ast::ASTNode>();
+                new (row_node) ast::ASTNode(ast::NodeType::RowExpr);
+                row_node->node_id = next_node_id_++;
+                if (first) {
+                    first->parent = row_node;
+                    row_node->first_child = first;
+                    row_node->child_count = 1;
+                }
+                ast::ASTNode* last_elem = first;
+                while (current_token_ && current_token_->value == ",") {
+                    advance(); // consume ','
+                    auto* elem = parse_expression(0);
+                    if (!elem) break;
+                    elem->parent = row_node;
+                    if (last_elem) {
+                        last_elem->next_sibling = elem;
+                    } else {
+                        row_node->first_child = elem;
+                    }
+                    last_elem = elem;
+                    row_node->child_count++;
+                }
+                if (current_token_ && current_token_->value == ")") {
+                    if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                    advance();
+                }
+                return row_node;
+            }
+
             // Consume closing ')'
             if (current_token_ && current_token_->value == ")") {
                 if (parenthesis_depth_ > 0) parenthesis_depth_--;
                 advance();
             }
-            
-            return expr;
+
+            return first;
         }
     }
     
@@ -230,6 +262,29 @@ ast::ASTNode* Parser::parse_primary_expression() {
             null_node->primary_text = copy_to_arena("NULL");
             advance();
             return null_node;
+        } else if ((kw == "INTERVAL" || kw == "interval") &&
+                   peek_token_ && peek_token_->type == tokenizer::TokenType::String) {
+            // INTERVAL '<literal>' — parsed as an IntervalLiteral whose value is
+            // exposed as a child StringLiteral (the interval string is not further
+            // decomposed here). Only triggers when a string follows, so INTERVAL
+            // used as a plain identifier falls through unchanged.
+            advance(); // consume INTERVAL
+            auto* interval_node = arena_.allocate<ast::ASTNode>();
+            new (interval_node) ast::ASTNode(ast::NodeType::IntervalLiteral);
+            interval_node->node_id = next_node_id_++;
+            interval_node->data_type = ast::DataType::Interval;
+            interval_node->primary_text = copy_to_arena(current_token_->value);
+
+            auto* str_node = arena_.allocate<ast::ASTNode>();
+            new (str_node) ast::ASTNode(ast::NodeType::StringLiteral);
+            str_node->node_id = next_node_id_++;
+            str_node->primary_text = copy_to_arena(current_token_->value);
+            str_node->parent = interval_node;
+            interval_node->first_child = str_node;
+            interval_node->child_count = 1;
+
+            advance(); // consume the interval string
+            return interval_node;
         }
     }
     
@@ -237,6 +292,43 @@ ast::ASTNode* Parser::parse_primary_expression() {
     // Also handle keywords that can be used as identifiers (e.g., date, time, level)
     if (current_token_->type == tokenizer::TokenType::Identifier ||
         current_token_->type == tokenizer::TokenType::Keyword) {
+        // ARRAY[ elem, ... ] constructor. Handled before the plain-identifier
+        // path so the bracketed element list is consumed as part of the
+        // expression instead of being left dangling (which desynchronised
+        // parenthesis tracking inside e.g. ANY(ARRAY[...])).
+        if ((current_token_->value == "ARRAY" || current_token_->value == "array") &&
+            peek_token_ && peek_token_->value == "[") {
+            advance(); // consume ARRAY
+            advance(); // consume '['
+            auto* array_node = arena_.allocate<ast::ASTNode>();
+            new (array_node) ast::ASTNode(ast::NodeType::ArrayConstructor);
+            array_node->node_id = next_node_id_++;
+            array_node->primary_text = copy_to_arena("ARRAY");
+
+            ast::ASTNode* last_elem = nullptr;
+            while (current_token_ && current_token_->value != "]") {
+                auto* elem = parse_expression(0);
+                if (!elem) break;
+                elem->parent = array_node;
+                if (!array_node->first_child) {
+                    array_node->first_child = elem;
+                } else {
+                    last_elem->next_sibling = elem;
+                }
+                last_elem = elem;
+                array_node->child_count++;
+                if (current_token_ && current_token_->value == ",") {
+                    advance();
+                } else {
+                    break;
+                }
+            }
+            if (current_token_ && current_token_->value == "]") {
+                advance(); // consume ']'
+            }
+            return array_node;
+        }
+
         // Look ahead using peek_token_
         if (peek_token_) {
             // Check for function call

@@ -7,7 +7,25 @@
 #include "db25/parser/parser.hpp"
 #include "db25/parser/tokenizer_adapter.hpp"
 
+#include <charconv>
+
 namespace db25::parser {
+
+namespace {
+// Non-throwing string_view -> unsigned parse. Exceptions are disabled
+// (-fno-exceptions), so std::stoi/std::stol would std::terminate() the whole
+// process on an out-of-range literal; std::from_chars just reports an error.
+[[nodiscard]] uint32_t parse_uint_or(std::string_view text, uint32_t fallback) noexcept {
+    uint32_t value = 0;
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end) {
+        return fallback;
+    }
+    return value;
+}
+} // namespace
 
 // ========== DDL Entry Points ==========
 
@@ -392,15 +410,16 @@ ast::ASTNode* Parser::parse_data_type() {
             
             // Parse precision
             if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
-                type_node->semantic_flags = std::stoi(std::string(current_token_->value)); // Store precision
+                type_node->semantic_flags = static_cast<uint16_t>(
+                    parse_uint_or(current_token_->value, 0)); // Store precision
                 advance();
-                
+
                 // Parse scale if present
                 if (current_token_ && current_token_->value == ",") {
                     advance(); // consume comma
                     if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
                         // Store scale in upper 16 bits
-                        uint32_t scale = std::stoi(std::string(current_token_->value));
+                        uint32_t scale = parse_uint_or(current_token_->value, 0);
                         type_node->semantic_flags |= (scale << 16);
                         advance();
                     }
@@ -420,7 +439,7 @@ ast::ASTNode* Parser::parse_data_type() {
             // Optional array size
             if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
                 // Store array size somehow (could use hash_cache field)
-                type_node->hash_cache = std::stoi(std::string(current_token_->value));
+                type_node->hash_cache = parse_uint_or(current_token_->value, 0);
                 advance();
             }
             
@@ -429,6 +448,9 @@ ast::ASTNode* Parser::parse_data_type() {
                 type_node->flags = static_cast<ast::NodeFlags>(
                     static_cast<uint8_t>(type_node->flags) | 0x80  // Custom flag for array type
                 );
+                // Record array-ness in the type text so it is visible in the AST
+                type_node->primary_text =
+                    copy_to_arena(std::string(type_node->primary_text) + "[]");
             }
         }
     }
