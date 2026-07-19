@@ -107,7 +107,7 @@ ParseResult Parser::parse(std::string_view sql) {
         return std::unexpected(ParseError{
             line, col,
             pos,
-            "Failed to parse statement",
+            has_error_ ? error_message_ : std::string("Failed to parse statement"),
             sql.substr(0, 50)
         });
     }
@@ -158,7 +158,9 @@ Parser::parse_script(std::string_view sql) {
     next_node_id_ = 1;
     parenthesis_depth_ = 0;
     depth_exceeded_ = false;
-    
+    has_error_ = false;
+    error_message_.clear();
+
     // Create tokenizer with the new input
     delete tokenizer_;  // Clean up any previous tokenizer
     tokenizer_ = new tokenizer::Tokenizer(input_);
@@ -186,7 +188,8 @@ Parser::parse_script(std::string_view sql) {
                 uint32_t pos = current_token_ ? static_cast<uint32_t>(current_token_->column) : 0;
                 return std::unexpected(ParseError{
                     line, col, pos,
-                    "Failed to parse statement at position " + std::to_string(pos),
+                    has_error_ ? error_message_
+                               : "Failed to parse statement at position " + std::to_string(pos),
                     sql.substr(pos, 50)
                 });
             }
@@ -214,6 +217,8 @@ void Parser::reset() {
     next_node_id_ = 1;
     parenthesis_depth_ = 0;  // Reset parenthesis tracking
     depth_exceeded_ = false;  // Reset depth exceeded flag
+    has_error_ = false;       // Reset recoverable error state
+    error_message_.clear();
     delete tokenizer_;  // Safe even if nullptr
     tokenizer_ = nullptr;
     current_token_ = nullptr;
