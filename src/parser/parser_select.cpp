@@ -1417,13 +1417,37 @@ ast::ASTNode* Parser::parse_column_ref() {
     
     // Check for qualified name parts
     // Note: The tokenizer might classify "." as Operator, not Delimiter
-    while (current_token_ && 
+    while (current_token_ &&
            (current_token_->type == tokenizer::TokenType::Delimiter ||
             current_token_->type == tokenizer::TokenType::Operator) &&
            current_token_->value == ".") {
         advance(); // consume dot
-        
-        if (current_token_ && 
+
+        // Qualified star: "<qualifier>.*" (e.g. "t.*" or "schema.table.*").
+        // Produce a Star node whose schema_name holds the dotted qualifier so
+        // the downstream semantic analyzer can expand it, and consume the '*'
+        // so the remainder of the statement (FROM, etc.) parses normally.
+        if (current_token_ &&
+            current_token_->type == tokenizer::TokenType::Operator &&
+            current_token_->value == "*") {
+            advance(); // consume '*'
+            auto* star = arena_.allocate<ast::ASTNode>();
+            new (star) ast::ASTNode(ast::NodeType::Star);
+            star->node_id = next_node_id_++;
+
+            std::string qualifier;
+            for (size_t i = 0; i < parts.size(); i++) {
+                if (i > 0) {
+                    qualifier += '.';
+                }
+                qualifier += parts[i];
+            }
+            star->schema_name = copy_to_arena(qualifier);
+            star->primary_text = copy_to_arena("*");
+            return star;
+        }
+
+        if (current_token_ &&
             (current_token_->type == tokenizer::TokenType::Identifier ||
              current_token_->type == tokenizer::TokenType::Keyword)) {
             // Allow keywords as column names in qualified references (e.g., h.level)

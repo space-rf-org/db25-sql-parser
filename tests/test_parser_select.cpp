@@ -76,6 +76,88 @@ TEST_F(SelectParserTest, SelectStarHasCorrectStructure) {
     ASSERT_NE(from_clause, nullptr) << "SELECT statement should have FromClause child";
 }
 
+// ============================================================================
+// QUALIFIED STAR TESTS  (table.* -> Star node with schema_name == qualifier)
+// ============================================================================
+
+TEST_F(SelectParserTest, QualifiedStarCarriesQualifier) {
+    auto* ast = parse_select("SELECT t.* FROM t");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::SelectStmt);
+
+    // SELECT list must contain a single Star whose schema_name holds "t".
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+    EXPECT_EQ(count_children(select_list), 1);
+
+    auto* star = find_child_by_type(select_list, NodeType::Star);
+    ASSERT_NE(star, nullptr) << "t.* should parse into a Star node";
+    EXPECT_EQ(star->schema_name, "t") << "qualifier 't' must land in schema_name";
+
+    // The FROM clause must still be present and reference table "t".
+    auto* from_clause = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from_clause, nullptr) << "FROM clause must survive qualified star";
+    ASSERT_NE(from_clause->get_first_child(), nullptr);
+    EXPECT_EQ(from_clause->get_first_child()->primary_text, "t");
+}
+
+TEST_F(SelectParserTest, UnqualifiedStarHasEmptyQualifier) {
+    auto* ast = parse_select("SELECT * FROM t");
+    ASSERT_NE(ast, nullptr);
+
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+
+    auto* star = find_child_by_type(select_list, NodeType::Star);
+    ASSERT_NE(star, nullptr);
+    EXPECT_TRUE(star->schema_name.empty())
+        << "plain SELECT * must keep an empty schema_name";
+
+    auto* from_clause = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from_clause, nullptr);
+}
+
+TEST_F(SelectParserTest, MixedQualifiedStarAndColumn) {
+    auto* ast = parse_select("SELECT a.*, b.id FROM a JOIN b ON a.id = b.id");
+    ASSERT_NE(ast, nullptr);
+
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+    ASSERT_EQ(count_children(select_list), 2);
+
+    // First item: a.* -> Star with schema_name "a".
+    auto* first = select_list->get_first_child();
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->node_type, NodeType::Star);
+    EXPECT_EQ(first->schema_name, "a");
+
+    // Second item: b.id -> ColumnRef, not a Star.
+    auto* second = first->get_next_sibling();
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->node_type, NodeType::ColumnRef);
+    EXPECT_EQ(second->primary_text, "b.id");
+
+    // FROM clause still parses (the JOIN did not get swallowed).
+    auto* from_clause = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from_clause, nullptr);
+}
+
+TEST_F(SelectParserTest, MultiPartQualifiedStar) {
+    // schema.table.* -> Star whose schema_name is the full dotted qualifier.
+    auto* ast = parse_select("SELECT s.t.* FROM s.t");
+    ASSERT_NE(ast, nullptr);
+
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+
+    auto* star = find_child_by_type(select_list, NodeType::Star);
+    ASSERT_NE(star, nullptr);
+    EXPECT_EQ(star->schema_name, "s.t");
+
+    auto* from_clause = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from_clause, nullptr);
+}
+
 TEST_F(SelectParserTest, SelectListWithColumns) {
     auto* ast = parse_select("SELECT id, name, email FROM users");
     auto children = ast->get_children();
