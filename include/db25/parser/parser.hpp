@@ -18,6 +18,7 @@
 #include "db25/memory/arena.hpp"
 #include <memory>
 #include <expected>
+#include <string>
 #include <string_view>
 #include <vector>
 #include <span>
@@ -196,6 +197,9 @@ protected:  // Changed from private to allow friend class access
     template<typename... Args>
     [[nodiscard]] ast::ASTNode* make_node(Args&&... args) {
         auto* node = arena_.allocate<ast::ASTNode>();
+        if (!node) {
+            return nullptr;  // Arena exhausted / allocation failed - propagate instead of null-deref
+        }
         std::construct_at(node, std::forward<Args>(args)...);
         node->node_id = next_node_id_++;
         return node;
@@ -297,7 +301,7 @@ protected:  // Changed from private to allow friend class access
     
     // ========== Error Handling ==========
     
-    [[noreturn]] void error(const std::string& message);
+    void error(const std::string& message);
     void synchronize();  // Error recovery
     
     // ========== Validation State ==========
@@ -347,6 +351,11 @@ private:
     std::string_view input_;        // Current input being parsed
     size_t current_depth_;          // Current recursion depth
     uint32_t next_node_id_;         // Next node ID to assign
+
+    // Recoverable error state. Set by error() instead of aborting the process,
+    // so parse()/parse_script() can surface a ParseError on malformed input.
+    bool has_error_ = false;         // A parse error was recorded during the current parse
+    std::string error_message_;      // Message of the first recorded error
 };
 
 } // namespace db25::parser

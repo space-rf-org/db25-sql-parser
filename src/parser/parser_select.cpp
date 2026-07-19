@@ -1883,11 +1883,17 @@ ast::ASTNode* Parser::parse_select_item() {
 
 // ========== Error Handling ==========
 
-[[noreturn]] void Parser::error(const std::string& message) {
-    // Since we have exceptions disabled, use abort for fatal errors
-    // In production, this should set an error state instead
-    (void)message;  // Suppress unused warning
-    std::abort();   // Fatal error - parser is in invalid state
+void Parser::error(const std::string& message) {
+    // Exceptions are disabled (-fno-exceptions). Rather than std::abort()ing
+    // the host process on malformed input (a denial-of-service hazard that
+    // defeated the std::expected-based error API), record the first error and
+    // enter a recoverable failed state. Callers already return nullptr after
+    // calling error(), so this unwinds cleanly up to parse()/parse_script(),
+    // which surface the recorded message as a ParseError.
+    if (!has_error_) {
+        has_error_ = true;
+        error_message_ = message;
+    }
 }
 
 void Parser::synchronize() {
