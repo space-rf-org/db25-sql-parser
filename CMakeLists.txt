@@ -210,6 +210,9 @@ if(BUILD_TESTS)
     
     # Advanced Types Support test
     add_parser_test(test_advanced_types tests/test_advanced_types.cpp gtest)
+
+    # AST string lifetime regression test (arena-owned strings outlive tokenizer)
+    add_parser_test(test_ast_lifetime tests/test_ast_lifetime.cpp gtest)
     
     # Parser Code Violations test
     add_parser_test_no_gtest(test_parser_violations tests/test_parser_violations.cpp)

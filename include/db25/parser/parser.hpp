@@ -113,6 +113,12 @@ public:
      * Parse SQL text and return AST
      * @param sql SQL text to parse
      * @return Root AST node or parse error
+     *
+     * All string data on the returned AST is copied into the parser's arena,
+     * so the AST does not alias either the input @p sql buffer or the internal
+     * tokenizer. The tokenizer is released before this returns; the AST stays
+     * valid until the Parser is destroyed or reset()/parse()/parse_script() is
+     * called again (which recycles the arena).
      */
     [[nodiscard]] ParseResult parse(std::string_view sql);
     
