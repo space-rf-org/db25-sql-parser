@@ -4,13 +4,12 @@ on:
   push:
   pull_request:
 
-# Two arena tests are excluded from the gating runs and reported separately:
-#   - ArenaEdgeTest      : exercises >64-byte over-alignment, a known limitation
-#                          of the frozen arena allocator.
-#   - ArenaStressTest    : asserts absolute-nanosecond allocation budgets, which
-#                          are hardware/build dependent and not correctness checks.
+# ArenaEdgeTest is excluded from the gating runs and reported separately: it
+# exercises >64-byte over-alignment, a known limitation of the frozen arena
+# allocator. (ArenaStressTest's absolute-nanosecond budgets are now enforced
+# only in optimized builds and skipped otherwise, so it is not excluded.)
 env:
-  EXCLUDE_TESTS: "ArenaStressTest|ArenaEdgeTest"
+  EXCLUDE_TESTS: "ArenaEdgeTest"
 
 jobs:
   build-test:

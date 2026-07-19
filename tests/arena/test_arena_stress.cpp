@@ -50,9 +50,16 @@ TEST_F(ArenaStressTest, AllocationSpeed) {
               << "  Total allocated: " << arena.total_allocated() << " bytes\n"
               << "  Utilization: " << (arena.utilization() * 100) << "%\n";
     
-    // Target: < 5ns per allocation as per design
-    EXPECT_LT(ns_per_alloc, 10.0) 
+    // Target: < 5ns per allocation as per design.
+    // Absolute-nanosecond budgets are only meaningful in optimized builds;
+    // -O0 debug builds and slower/virtualised CI run well above them, so the
+    // assertion is enforced only under NDEBUG and skipped otherwise.
+#ifdef NDEBUG
+    EXPECT_LT(ns_per_alloc, 10.0)
         << "Allocation should be < 10ns (target is < 5ns)";
+#else
+    GTEST_SKIP() << "Timing assertion only enforced in optimized (NDEBUG) builds";
+#endif
 }
 
 TEST_F(ArenaStressTest, MixedSizeAllocationSpeed) {
@@ -72,9 +79,13 @@ TEST_F(ArenaStressTest, MixedSizeAllocationSpeed) {
     double ns_per_alloc = static_cast<double>(duration.count()) / STRESS_ITERATIONS;
     
     std::cout << "Mixed size allocation: " << ns_per_alloc << " ns per allocation\n";
-    
-    EXPECT_LT(ns_per_alloc, 15.0) 
+
+#ifdef NDEBUG
+    EXPECT_LT(ns_per_alloc, 15.0)
         << "Mixed size allocation should still be fast";
+#else
+    GTEST_SKIP() << "Timing assertion only enforced in optimized (NDEBUG) builds";
+#endif
 }
 
 // ============= Memory Pattern Tests =============
