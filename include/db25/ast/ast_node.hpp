@@ -17,9 +17,11 @@
 
 #include "node_types.hpp"
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <span>
 #include <expected>
+#include <utility>
 
 namespace db25::ast {
 
@@ -204,12 +206,17 @@ struct alignas(128) ASTNode {
     void remove_child(ASTNode* child) noexcept;
     [[nodiscard]] ASTNode* find_child(NodeType type) const noexcept;
     
-    // Visitor pattern with C++23 deducing this
+    // Visitor pattern. Portable const/non-const overloads instead of a C++23
+    // explicit object parameter ("deducing this"), which requires GCC 14+ /
+    // recent Clang and otherwise fails to compile on the toolchains this
+    // project documents as supported.
     template<typename Visitor>
-    auto accept(this auto&& self, Visitor&& visitor) {
-        return std::forward<Visitor>(visitor).visit(
-            std::forward<decltype(self)>(self)
-        );
+    auto accept(Visitor&& visitor) {
+        return std::forward<Visitor>(visitor).visit(*this);
+    }
+    template<typename Visitor>
+    auto accept(Visitor&& visitor) const {
+        return std::forward<Visitor>(visitor).visit(*this);
     }
     
     // Source location helpers
