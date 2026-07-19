@@ -16,6 +16,7 @@
 #include <atomic>
 #include <algorithm>
 #include <numeric>
+#include <cstring>  // std::memset (no longer transitively included under GCC 14+)
 
 using namespace db25;
 using namespace std::chrono;
