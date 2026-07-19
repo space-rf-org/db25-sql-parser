@@ -230,6 +230,29 @@ ast::ASTNode* Parser::parse_primary_expression() {
             null_node->primary_text = copy_to_arena("NULL");
             advance();
             return null_node;
+        } else if ((kw == "INTERVAL" || kw == "interval") &&
+                   peek_token_ && peek_token_->type == tokenizer::TokenType::String) {
+            // INTERVAL '<literal>' — parsed as an IntervalLiteral whose value is
+            // exposed as a child StringLiteral (the interval string is not further
+            // decomposed here). Only triggers when a string follows, so INTERVAL
+            // used as a plain identifier falls through unchanged.
+            advance(); // consume INTERVAL
+            auto* interval_node = arena_.allocate<ast::ASTNode>();
+            new (interval_node) ast::ASTNode(ast::NodeType::IntervalLiteral);
+            interval_node->node_id = next_node_id_++;
+            interval_node->data_type = ast::DataType::Interval;
+            interval_node->primary_text = copy_to_arena(current_token_->value);
+
+            auto* str_node = arena_.allocate<ast::ASTNode>();
+            new (str_node) ast::ASTNode(ast::NodeType::StringLiteral);
+            str_node->node_id = next_node_id_++;
+            str_node->primary_text = copy_to_arena(current_token_->value);
+            str_node->parent = interval_node;
+            interval_node->first_child = str_node;
+            interval_node->child_count = 1;
+
+            advance(); // consume the interval string
+            return interval_node;
         }
     }
     

@@ -429,6 +429,9 @@ ast::ASTNode* Parser::parse_data_type() {
                 type_node->flags = static_cast<ast::NodeFlags>(
                     static_cast<uint8_t>(type_node->flags) | 0x80  // Custom flag for array type
                 );
+                // Record array-ness in the type text so it is visible in the AST
+                type_node->primary_text =
+                    copy_to_arena(std::string(type_node->primary_text) + "[]");
             }
         }
     }
