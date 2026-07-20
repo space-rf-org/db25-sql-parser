@@ -163,20 +163,30 @@ struct alignas(128) ASTNode {
     
     // ========== Methods ==========
     
-    // Node type checking
+    // Node type checking. NOTE: these ranges must track the NodeType enum block
+    // boundaries in node_types.hpp. The statement block runs from SelectStmt
+    // through AlterViewStmt (not ExplainStmt, which is mid-block); the literal
+    // block is IntegerLiteral..DateTimeLiteral plus the out-of-block
+    // IntervalLiteral / JsonLiteral; the expression block is BinaryExpr..
+    // WindowExpr plus the value-producing constructor / window nodes.
     [[nodiscard]] constexpr bool is_statement() const noexcept {
-        return node_type >= NodeType::SelectStmt && 
-               node_type <= NodeType::ExplainStmt;
+        return node_type >= NodeType::SelectStmt &&
+               node_type <= NodeType::AlterViewStmt;
     }
-    
+
     [[nodiscard]] constexpr bool is_expression() const noexcept {
-        return node_type >= NodeType::BinaryExpr && 
-               node_type <= NodeType::WindowExpr;
+        return (node_type >= NodeType::BinaryExpr &&
+                node_type <= NodeType::WindowExpr) ||
+               node_type == NodeType::WindowFunction ||
+               node_type == NodeType::ArrayConstructor ||
+               node_type == NodeType::RowConstructor;
     }
-    
+
     [[nodiscard]] constexpr bool is_literal() const noexcept {
-        return node_type >= NodeType::IntegerLiteral && 
-               node_type <= NodeType::DateTimeLiteral;
+        return (node_type >= NodeType::IntegerLiteral &&
+                node_type <= NodeType::DateTimeLiteral) ||
+               node_type == NodeType::IntervalLiteral ||
+               node_type == NodeType::JsonLiteral;
     }
     
     [[nodiscard]] constexpr bool is_identifier() const noexcept {

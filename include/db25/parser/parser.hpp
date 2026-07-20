@@ -314,6 +314,12 @@ protected:  // Changed from private to allow friend class access
     
     int parenthesis_depth_ = 0;  // Track parenthesis balance
     bool strict_mode_ = true;    // Enable strict validation
+    // True while parsing the right-hand branch of a set operation. It tells
+    // parse_select_stmt to return the bare branch instead of consuming the
+    // following set operators itself, so the caller's loop can fold them
+    // left-associatively (A op B op C -> (A op B) op C). Reset per invocation so
+    // nested subqueries still handle their own set operations.
+    bool in_setop_rhs_ = false;
     
 public:
     // ========== Context Tracking ==========

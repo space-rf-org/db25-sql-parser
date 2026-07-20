@@ -140,9 +140,10 @@ if(BUILD_TESTS)
     # NOTE: test_parser.cpp, test_parser_sql_suite.cpp, and test_tokenizer_integration.cpp 
     # have been deleted. Only test_tokenizer_verification.cpp remains.
     
-    # TEMPORARILY DISABLED: test_ast has undefined symbols for *_to_string functions
-    # add_executable(test_ast tests/test_ast.cpp)
-    # target_link_libraries(test_ast db25parser gtest_main)
+    # test_ast: exercises the *_to_string helpers and is_statement/is_expression/
+    # is_literal predicates. Re-enabled now that the *_to_string functions have
+    # external linkage (they were constexpr-in-.cpp, hence previously unlinkable).
+    add_parser_test(test_ast tests/test_ast.cpp)
     
     # Tokenizer verification test - verifies correct tokens for parser
     add_parser_test_no_gtest(test_tokenizer_verification tests/test_tokenizer_verification.cpp)
@@ -164,6 +165,7 @@ if(BUILD_TESTS)
     add_parser_test(test_join_comprehensive tests/test_join_comprehensive.cpp)
     
     add_parser_test(test_sql_operators tests/test_sql_operators.cpp)
+    add_parser_test(test_precedence_regression tests/test_precedence_regression.cpp)
     
     add_parser_test(test_group_by tests/test_group_by.cpp)
     

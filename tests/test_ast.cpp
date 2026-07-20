@@ -5,8 +5,10 @@
 using namespace db25::ast;
 
 TEST(ASTNodeTest, SizeAndAlignment) {
-    EXPECT_EQ(sizeof(ASTNode), 64);
-    EXPECT_EQ(alignof(ASTNode), 64);
+    // The node is a 128-byte, 128-byte-aligned (two cache lines) structure; this
+    // is also static_assert-enforced in ast_node.hpp.
+    EXPECT_EQ(sizeof(ASTNode), 128);
+    EXPECT_EQ(alignof(ASTNode), 128);
 }
 
 TEST(ASTNodeTest, DefaultConstruction) {
