@@ -227,6 +227,9 @@ if(BUILD_TESTS)
     
     # Comprehensive AST dump test - combines all visual dump functionality
     add_parser_test_no_gtest(test_ast_dump tests/test_ast_dump.cpp)
+
+    # DepthGuard security test - recursion depth protection against stack overflow
+    add_parser_test(test_depth_guard tests/security/test_depth_guard.cpp)
     
     # Add custom target for generating visual dumps
     add_custom_target(generate_ast_dumps
