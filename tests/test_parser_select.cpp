@@ -158,6 +158,107 @@ TEST_F(SelectParserTest, MultiPartQualifiedStar) {
     ASSERT_NE(from_clause, nullptr);
 }
 
+// ----------------------------------------------------------------------------
+// QUALIFIED STAR - PRODUCTION-SHAPED REGRESSIONS
+//
+// These lock in the behaviour the semantic analyzer's expand_star relies on
+// for the common production pattern `SELECT o.*, c.name FROM orders o ...`:
+//   * `<alias>.*` must become a Star whose qualifier lands in schema_name;
+//   * the FROM clause (and its table alias) must survive intact;
+//   * a `<alias>.*` immediately followed by `, <column>` must not swallow the
+//     comma or the following column;
+//   * the arithmetic `a * b` must remain a multiplication BinaryExpr and must
+//     never be mistaken for a qualified star.
+// ----------------------------------------------------------------------------
+
+TEST_F(SelectParserTest, QualifiedStarWithTableAlias) {
+    // The canonical production case: alias.* with an aliased table in FROM.
+    auto* ast = parse_select("SELECT o.* FROM orders o");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::SelectStmt);
+
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+    EXPECT_EQ(count_children(select_list), 1);
+
+    auto* star = find_child_by_type(select_list, NodeType::Star);
+    ASSERT_NE(star, nullptr) << "o.* must parse into a Star node, not a multiply";
+    EXPECT_EQ(star->schema_name, "o") << "alias 'o' must land in schema_name";
+
+    // FROM clause must survive and still reference the aliased table.
+    auto* from_clause = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from_clause, nullptr) << "FROM clause must not be dropped";
+    auto* table_ref = from_clause->get_first_child();
+    ASSERT_NE(table_ref, nullptr);
+    EXPECT_EQ(table_ref->node_type, NodeType::TableRef);
+    EXPECT_EQ(table_ref->primary_text, "orders");
+}
+
+TEST_F(SelectParserTest, QualifiedStarThenColumn) {
+    // `t.*, name` -> Star(schema_name="t") followed by a plain column ref.
+    auto* ast = parse_select("SELECT t.*, name FROM t");
+    ASSERT_NE(ast, nullptr);
+
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+    ASSERT_EQ(count_children(select_list), 2)
+        << "the comma and following column must not be swallowed";
+
+    auto* first = select_list->get_first_child();
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->node_type, NodeType::Star);
+    EXPECT_EQ(first->schema_name, "t");
+
+    auto* second = first->get_next_sibling();
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->node_type, NodeType::ColumnRef);
+    EXPECT_EQ(second->primary_text, "name");
+
+    auto* from_clause = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from_clause, nullptr);
+}
+
+TEST_F(SelectParserTest, PlainStarStaysUnqualified) {
+    // Guard the plain `*` case alongside the qualified variants.
+    auto* ast = parse_select("SELECT * FROM t");
+    ASSERT_NE(ast, nullptr);
+
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+
+    auto* star = find_child_by_type(select_list, NodeType::Star);
+    ASSERT_NE(star, nullptr);
+    EXPECT_TRUE(star->schema_name.empty())
+        << "plain '*' must carry no qualifier";
+}
+
+TEST_F(SelectParserTest, StarMultiplicationIsNotQualifiedStar) {
+    // `a * b` must remain an arithmetic multiplication, never a Star.
+    auto* ast = parse_select("SELECT a * b FROM t");
+    ASSERT_NE(ast, nullptr);
+
+    auto* select_list = find_child_by_type(ast, NodeType::SelectList);
+    ASSERT_NE(select_list, nullptr);
+    ASSERT_EQ(count_children(select_list), 1);
+
+    auto* item = select_list->get_first_child();
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->node_type, NodeType::BinaryExpr)
+        << "a * b must parse as multiplication, not a Star";
+    EXPECT_EQ(item->primary_text, "*");
+
+    // The two operands are column references a and b.
+    auto* lhs = item->get_first_child();
+    ASSERT_NE(lhs, nullptr);
+    auto* rhs = lhs->get_next_sibling();
+    ASSERT_NE(rhs, nullptr);
+    EXPECT_EQ(lhs->primary_text, "a");
+    EXPECT_EQ(rhs->primary_text, "b");
+
+    // No Star anywhere in the SELECT list.
+    EXPECT_EQ(find_child_by_type(select_list, NodeType::Star), nullptr);
+}
+
 TEST_F(SelectParserTest, SelectListWithColumns) {
     auto* ast = parse_select("SELECT id, name, email FROM users");
     auto children = ast->get_children();
