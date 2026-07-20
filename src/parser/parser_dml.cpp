@@ -411,6 +411,7 @@ ast::ASTNode* Parser::parse_update_stmt() {
     
     // Optional WHERE clause
     if (current_token_ && current_token_->keyword_id == db25::Keyword::WHERE) {
+        advance();  // consume WHERE (parse_where_clause parses only the condition)
         auto* where_clause = parse_where_clause();
         if (where_clause) {
             where_clause->parent = update_node;
@@ -544,6 +545,7 @@ ast::ASTNode* Parser::parse_delete_stmt() {
     
     // Optional WHERE clause
     if (current_token_ && current_token_->keyword_id == db25::Keyword::WHERE) {
+        advance();  // consume WHERE (parse_where_clause parses only the condition)
         auto* where_clause = parse_where_clause();
         if (where_clause) {
             where_clause->parent = delete_node;
