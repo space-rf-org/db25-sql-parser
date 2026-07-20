@@ -338,12 +338,16 @@ enum FrameBoundFlags : uint16_t {
 };
 
 /**
- * Convert enum to string for debugging
- * Using C++23 constexpr improvements
+ * Convert enum to string for debugging.
+ *
+ * These are ordinary (non-constexpr) functions defined out-of-line in
+ * ast_node.cpp, so they have external linkage and can be called from any
+ * translation unit that links the library (tools, tests). They were previously
+ * declared constexpr but defined in a .cpp, which emitted no linkable symbol.
  */
-[[nodiscard]] constexpr const char* node_type_to_string(NodeType type) noexcept;
-[[nodiscard]] constexpr const char* binary_op_to_string(BinaryOp op) noexcept;
-[[nodiscard]] constexpr const char* unary_op_to_string(UnaryOp op) noexcept;
-[[nodiscard]] constexpr const char* data_type_to_string(DataType type) noexcept;
+[[nodiscard]] const char* node_type_to_string(NodeType type) noexcept;
+[[nodiscard]] const char* binary_op_to_string(BinaryOp op) noexcept;
+[[nodiscard]] const char* unary_op_to_string(UnaryOp op) noexcept;
+[[nodiscard]] const char* data_type_to_string(DataType type) noexcept;
 
 } // namespace db25::ast

@@ -400,24 +400,27 @@ int Parser::get_precedence() const {
         // Don't treat comma or dot as binary operators in expressions
         if (op == "," || op == ".") return 0;
         
-        // Bitwise operators (lowest precedence after logical)
-        if (op == "|") return 2;   // Bitwise OR (lower than concat)
-        if (op == "&") return 2;   // Bitwise AND
-        if (op == "^") return 2;   // Bitwise XOR
-        if (op == "<<" || op == ">>") return 2;  // Bit shifts
-        
-        // String concatenation
-        if (op == "||") return 3;  // String concatenation (lower than comparison)
-        
         // Comparison operators
         if (op == "=") return 4;  // PREC_COMP
         if (op == "<" || op == ">") return 4;  // PREC_COMP
         if (op == "<=" || op == ">=") return 4;  // PREC_COMP
         if (op == "<>" || op == "!=") return 4;  // PREC_COMP
-        
-        // Arithmetic operators
-        if (op == "+" || op == "-") return 5;  // PREC_TERM
-        if (op == "*" || op == "/" || op == "%") return 6;  // PREC_FACTOR
+
+        // String concatenation binds TIGHTER than comparison (a || b = c parses
+        // as (a || b) = c), and looser than the bitwise/arithmetic operators.
+        if (op == "||") return 5;  // PREC_CONCAT
+
+        // Bitwise / shift operators all bind tighter than comparison (so
+        // `flags & 4 = 4` is `(flags & 4) = 4`) and are ranked among themselves
+        // as | < ^ < & < shifts, per common SQL (MySQL) ordering.
+        if (op == "|") return 6;   // Bitwise OR
+        if (op == "^") return 7;   // Bitwise XOR
+        if (op == "&") return 8;   // Bitwise AND
+        if (op == "<<" || op == ">>") return 9;  // Bit shifts
+
+        // Arithmetic operators (tightest binary operators).
+        if (op == "+" || op == "-") return 10;  // PREC_TERM
+        if (op == "*" || op == "/" || op == "%") return 11;  // PREC_FACTOR
         
         // Check for invalid operators (from other languages)
         if (op == "==" || op == "===" || op == "!==") {
