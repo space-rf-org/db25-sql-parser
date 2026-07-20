@@ -1237,52 +1237,64 @@ ast::ASTNode* Parser::parse_order_by_clause() {
 }
 
 ast::ASTNode* Parser::parse_limit_clause() {
-    // Parse limit number
-    if (!current_token_ || current_token_->type != tokenizer::TokenType::Number) {
-        // No number after LIMIT
+    // Parse a LIMIT/OFFSET operand. The operand is a numeric literal that may
+    // carry a leading unary minus (e.g. LIMIT -1); the minus is folded into the
+    // literal so the (invalid) value is preserved in the AST for later checks.
+    auto parse_operand = [this]() -> ast::ASTNode* {
+        bool negative = false;
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Operator &&
+            current_token_->value == "-") {
+            negative = true;
+            advance();  // consume -
+        }
+
+        if (!current_token_ || current_token_->type != tokenizer::TokenType::Number) {
+            return nullptr;
+        }
+
+        std::string text;
+        if (negative) {
+            text = "-";
+        }
+        text += std::string(current_token_->value);
+
+        auto* num_node = arena_.allocate<ast::ASTNode>();
+        new (num_node) ast::ASTNode(internal::number_literal_type(text));
+        num_node->node_id = next_node_id_++;
+        num_node->primary_text = copy_to_arena(text);
+        advance();
+        return num_node;
+    };
+
+    // Parse limit operand
+    auto* num_node = parse_operand();
+    if (!num_node) {
+        // No numeric operand after LIMIT
         return nullptr;
     }
-    
-    // Create LIMIT clause node since we have a number
+
+    // Create LIMIT clause node since we have an operand
     auto* limit_node = arena_.allocate<ast::ASTNode>();
     new (limit_node) ast::ASTNode(ast::NodeType::LimitClause);
     limit_node->node_id = next_node_id_++;
-    
-    // Create and add the limit number node
-    auto* num_node = arena_.allocate<ast::ASTNode>();
-    new (num_node) ast::ASTNode(ast::NodeType::IntegerLiteral);
-    num_node->node_id = next_node_id_++;
-    
-    // Store the limit value
-    num_node->primary_text = copy_to_arena(current_token_->value);
-    
+
     num_node->parent = limit_node;
     limit_node->first_child = num_node;
     limit_node->child_count = 1;
-    
-    advance();
-    
+
     // Check for OFFSET
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::OFFSET) {
         advance();
-        
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
-            auto* offset_node = arena_.allocate<ast::ASTNode>();
-            new (offset_node) ast::ASTNode(ast::NodeType::IntegerLiteral);
-            offset_node->node_id = next_node_id_++;
-            
-            // Store the offset value
-            offset_node->primary_text = copy_to_arena(current_token_->value);
-            
+
+        auto* offset_node = parse_operand();
+        if (offset_node) {
             offset_node->parent = limit_node;
             num_node->next_sibling = offset_node;
             limit_node->child_count++;
-            
-            advance();
         }
     }
-    
+
     return limit_node;
 }
 
