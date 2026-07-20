@@ -243,13 +243,17 @@ if(BUILD_TOOLS)
     # Enhanced AST Viewer - Professional AST visualization tool with vivid colors
     add_executable(ast_viewer_enhanced tools/ast_viewer_enhanced.cpp)
     target_link_libraries(ast_viewer_enhanced db25parser pthread)
-    
+
+    # ast_to_dot - emit a Graphviz DOT graph of the parsed AST (for figures/docs)
+    add_executable(ast_to_dot tools/ast_to_dot.cpp)
+    target_link_libraries(ast_to_dot db25parser pthread)
+
     # TPC-C Stress Test Runner - Performance benchmarking tool
     add_executable(tpcc_stress_runner tests/tpcc_stress_runner.cpp)
     target_link_libraries(tpcc_stress_runner db25parser pthread)
     
     # Install the tools
-    install(TARGETS ast_viewer_enhanced tpcc_stress_runner
+    install(TARGETS ast_viewer_enhanced ast_to_dot tpcc_stress_runner
         RUNTIME DESTINATION bin
     )
 endif()
