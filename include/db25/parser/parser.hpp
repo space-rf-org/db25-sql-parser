@@ -125,6 +125,21 @@ public:
      */
     [[nodiscard]] size_t get_memory_used() const noexcept;
     [[nodiscard]] size_t get_node_count() const noexcept;
+
+    // ========== Trailing-input Diagnostics ==========
+    //
+    // The parser is intentionally lenient: parse() still returns success when
+    // tokens remain after a complete statement (silent truncation), so this is
+    // exposed as a queryable diagnostic rather than a hard parse failure. After
+    // a parse()/parse_script() call these report how much input was left
+    // unconsumed past the parsed statement(s) (a single trailing ';' terminator
+    // is NOT counted). Reset at the start of every parse.
+
+    /// Number of significant tokens left unconsumed after the last parse.
+    [[nodiscard]] size_t trailing_token_count() const noexcept { return trailing_token_count_; }
+
+    /// True when the last parse left significant trailing input unconsumed.
+    [[nodiscard]] bool has_trailing_input() const noexcept { return trailing_token_count_ > 0; }
     
     // ========== Configuration ==========
     
@@ -350,6 +365,10 @@ private:
     // so parse()/parse_script() can surface a ParseError on malformed input.
     bool has_error_ = false;         // A parse error was recorded during the current parse
     std::string error_message_;      // Message of the first recorded error
+
+    // Count of significant tokens left after the parsed statement(s). Surfaced
+    // via trailing_token_count()/has_trailing_input(); does not affect success.
+    size_t trailing_token_count_ = 0;
 };
 
 } // namespace db25::parser

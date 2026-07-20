@@ -981,7 +981,7 @@ ast::ASTNode* Parser::parse_alter_table_full() {
                 }
             }
         }
-    } else if (current_token_ && current_token_->value == "RENAME") {
+    } else if (current_token_ && current_token_->keyword_id == db25::Keyword::RENAME) {
         advance();
         action->primary_text = copy_to_arena("RENAME");
         
@@ -1196,7 +1196,7 @@ ast::ASTNode* Parser::parse_create_trigger() {
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::AFTER) {
         trigger_node->semantic_flags |= 0x20;  // AFTER flag
         advance();
-    } else if (current_token_ && current_token_->value == "INSTEAD") {
+    } else if (current_token_ && current_token_->keyword_id == db25::Keyword::INSTEAD) {
         advance();
         if (current_token_ && current_token_->keyword_id == db25::Keyword::OF) {
             advance();
@@ -1349,7 +1349,7 @@ ast::ASTNode* Parser::parse_create_schema() {
     }
     
     // Optional AUTHORIZATION clause
-    if (current_token_ && current_token_->value == "AUTHORIZATION") {
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::AUTHORIZATION) {
         advance();
         if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
             schema_node->schema_name = copy_to_arena(current_token_->value); // Store owner in schema_name

@@ -1387,16 +1387,51 @@ ast::ASTNode* Parser::parse_table_reference() {
 
         ref_node = subquery_node;
     }
-    // Simple table name
+    // Simple table name, optionally schema/catalog qualified: "schema.table"
+    // (or "catalog.schema.table"). Read every dotted part, not just the first,
+    // otherwise the qualifier and everything after it (WHERE, etc.) is silently
+    // dropped -- a data-loss bug for statements like DELETE.
     else if (current_token_->type == tokenizer::TokenType::Identifier) {
         auto* table_node = arena_.allocate<ast::ASTNode>();
         new (table_node) ast::ASTNode(ast::NodeType::TableRef);
         table_node->node_id = next_node_id_++;
 
-        // Store table name
-        table_node->primary_text = copy_to_arena(current_token_->value);
-
+        // Collect the dotted parts of the qualified table name. The tokenizer
+        // may classify "." as Operator or Delimiter (see parse_column_ref).
+        std::vector<std::string_view> parts;
+        parts.push_back(current_token_->value);
         advance();
+        while (current_token_ &&
+               (current_token_->type == tokenizer::TokenType::Delimiter ||
+                current_token_->type == tokenizer::TokenType::Operator) &&
+               current_token_->value == "." &&
+               peek_token_ &&
+               (peek_token_->type == tokenizer::TokenType::Identifier ||
+                peek_token_->type == tokenizer::TokenType::Keyword)) {
+            advance();  // consume '.'
+            parts.push_back(current_token_->value);
+            advance();  // consume the identifier after the dot
+        }
+
+        // FIELD REPRESENTATION (must stay consistent with the semantic
+        // analyzer, whose alias_of() reads schema_name as the ALIAS):
+        //   - primary_text : the (unqualified) table name        -> last part
+        //   - catalog_name : the schema/catalog qualifier(s)     -> earlier parts
+        //   - schema_name  : RESERVED for the table alias, set below; NEVER the
+        //                    schema qualifier (that would clobber the alias).
+        // catalog_name is chosen because get_qualified_name() already emits it
+        // ahead of the table name, and it does not collide with the alias slot.
+        table_node->primary_text = copy_to_arena(parts.back());
+        if (parts.size() > 1) {
+            std::string qualifier;
+            for (size_t i = 0; i + 1 < parts.size(); ++i) {
+                if (i > 0) qualifier += '.';
+                qualifier += parts[i];
+            }
+            table_node->catalog_name = copy_to_arena(qualifier);
+            // has_catalog() keys off catalog_name being non-empty; no flag needed.
+        }
+
         ref_node = table_node;
     }
 

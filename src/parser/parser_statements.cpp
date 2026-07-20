@@ -82,7 +82,7 @@ ast::ASTNode* Parser::parse_transaction_stmt() {
             advance(); // consume TO
             
             // Optional SAVEPOINT keyword
-            if (current_token_ && current_token_->value == "SAVEPOINT") {
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::SAVEPOINT) {
                 advance(); // consume SAVEPOINT
             }
             
@@ -120,7 +120,7 @@ ast::ASTNode* Parser::parse_transaction_stmt() {
         advance(); // consume RELEASE
         
         // Optional SAVEPOINT keyword
-        if (current_token_ && current_token_->value == "SAVEPOINT") {
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::SAVEPOINT) {
             advance(); // consume SAVEPOINT
         }
         
