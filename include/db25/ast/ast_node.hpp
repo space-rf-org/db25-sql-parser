@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <span>
+#include <vector>
 #include <expected>
 #include <utility>
 
@@ -208,8 +208,10 @@ struct alignas(128) ASTNode {
         return next_sibling; 
     }
     
-    // Get all children as span
-    [[nodiscard]] std::span<ASTNode*> get_children() const noexcept;
+    // Get all children as an owning vector. Returns by value (not a span over a
+    // shared buffer) so nested get_children() traversals do not corrupt each
+    // other; range-for and indexed callers are unaffected.
+    [[nodiscard]] std::vector<ASTNode*> get_children() const;
     
     // Tree manipulation
     void add_child(ASTNode* child) noexcept;

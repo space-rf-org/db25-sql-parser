@@ -4,22 +4,25 @@
 
 namespace db25::ast {
 
-std::span<ASTNode*> ASTNode::get_children() const noexcept {
+std::vector<ASTNode*> ASTNode::get_children() const {
+    std::vector<ASTNode*> children;
     if (child_count == 0 || !first_child) {
-        return {};
+        return children;
     }
-    
-    static thread_local std::vector<ASTNode*> children_buffer;
-    children_buffer.clear();
-    children_buffer.reserve(child_count);
-    
+
+    // Return an owning vector rather than a span over a shared thread-local
+    // buffer: a shared buffer is corrupted by nested traversal
+    // (for c : a->get_children() { for g : c->get_children() {...} }), where
+    // the inner call clears/reallocates the buffer out from under the outer
+    // span. Each call now owns its result, so nested iteration is safe.
+    children.reserve(child_count);
     ASTNode* current = first_child;
     while (current) {
-        children_buffer.push_back(current);
+        children.push_back(current);
         current = current->next_sibling;
     }
-    
-    return {children_buffer.data(), children_buffer.size()};
+
+    return children;
 }
 
 void ASTNode::add_child(ASTNode* const child) noexcept {

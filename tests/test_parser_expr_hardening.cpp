@@ -1,0 +1,179 @@
+/*
+ * Regression tests for expression-parser hardening:
+ *   - bind parameters ('?' and '$1') are preserved as Parameter nodes
+ *   - BETWEEN bounds are value expressions and do not absorb a comparison
+ *   - get_children() is safe under nested traversal
+ *
+ * These pin behavior found during code review so future regressions fail loudly.
+ */
+
+#include <gtest/gtest.h>
+#include "db25/parser/parser.hpp"
+#include "db25/ast/ast_node.hpp"
+#include "db25/ast/node_types.hpp"
+#include <string>
+#include <vector>
+
+using namespace db25;
+using namespace db25::parser;
+using namespace db25::ast;
+
+class ExprHardeningTest : public ::testing::Test {
+protected:
+    std::unique_ptr<Parser> parser;
+    void SetUp() override { parser = std::make_unique<Parser>(); }
+
+    ASTNode* parse(const std::string& sql) {
+        auto result = parser->parse(sql);
+        return result.has_value() ? result.value() : nullptr;
+    }
+    static ASTNode* find(ASTNode* n, NodeType t) {
+        if (!n) return nullptr;
+        if (n->node_type == t) return n;
+        for (auto* c = n->first_child; c; c = c->next_sibling) {
+            if (auto* h = find(c, t)) return h;
+        }
+        return nullptr;
+    }
+    static int count(ASTNode* n, NodeType t) {
+        if (!n) return 0;
+        int c = (n->node_type == t) ? 1 : 0;
+        for (auto* ch = n->first_child; ch; ch = ch->next_sibling) c += count(ch, t);
+        return c;
+    }
+    ASTNode* where_predicate(ASTNode* root) {
+        auto* w = find(root, NodeType::WhereClause);
+        return w ? w->first_child : nullptr;
+    }
+};
+
+// ---- Bind parameters -------------------------------------------------------
+
+TEST_F(ExprHardeningTest, PositionalParamInProjection) {
+    auto* ast = parse("SELECT ? FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* p = find(ast, NodeType::Parameter);
+    ASSERT_NE(p, nullptr);
+    EXPECT_EQ(p->primary_text, "?");
+}
+
+TEST_F(ExprHardeningTest, PositionalParamInWhere) {
+    // Regression: `= ?` was previously dropped, losing the comparison entirely.
+    auto* ast = parse("SELECT * FROM t WHERE id = ?");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "=");
+    auto* rhs = pred->first_child->next_sibling;
+    ASSERT_NE(rhs, nullptr);
+    EXPECT_EQ(rhs->node_type, NodeType::Parameter);
+    EXPECT_EQ(rhs->primary_text, "?");
+}
+
+TEST_F(ExprHardeningTest, NumberedParamInWhere) {
+    auto* ast = parse("SELECT * FROM t WHERE id = $1");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->primary_text, "=");
+    auto* rhs = pred->first_child->next_sibling;
+    ASSERT_NE(rhs, nullptr);
+    EXPECT_EQ(rhs->node_type, NodeType::Parameter);
+    EXPECT_EQ(rhs->primary_text, "$1");
+}
+
+TEST_F(ExprHardeningTest, MultipleParamsInValues) {
+    auto* ast = parse("INSERT INTO t VALUES (?, ?)");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(count(ast, NodeType::Parameter), 2);
+}
+
+TEST_F(ExprHardeningTest, NumberedParamsInArithmetic) {
+    auto* ast = parse("SELECT $1 + $2 FROM t");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(count(ast, NodeType::Parameter), 2);
+}
+
+// ---- BETWEEN bounds --------------------------------------------------------
+
+TEST_F(ExprHardeningTest, BetweenSimpleBounds) {
+    auto* ast = parse("SELECT * FROM t WHERE x BETWEEN 1 AND 10");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BetweenExpr);
+    // value, low, high
+    auto* value = pred->first_child;
+    ASSERT_NE(value, nullptr);
+    auto* low = value->next_sibling;
+    ASSERT_NE(low, nullptr);
+    auto* high = low->next_sibling;
+    ASSERT_NE(high, nullptr);
+    EXPECT_EQ(low->primary_text, "1");
+    EXPECT_EQ(high->primary_text, "10");
+}
+
+TEST_F(ExprHardeningTest, BetweenBoundDoesNotAbsorbComparison) {
+    // `x BETWEEN a = c AND b`: a BETWEEN bound is a value expression that binds
+    // tighter than comparison, so the low bound must NOT fold in the `= c`
+    // comparison (the previous bug produced BetweenExpr -> [x, (a=c), b]).
+    // The parse must not crash. If any BetweenExpr is produced, its low bound
+    // must not be a comparison node.
+    auto* ast = parse("SELECT * FROM t WHERE x BETWEEN a = c AND b");
+    ASSERT_NE(ast, nullptr);
+    auto* between = find(ast, NodeType::BetweenExpr);
+    if (between != nullptr) {
+        auto* value = between->first_child;
+        ASSERT_NE(value, nullptr);
+        auto* low = value->next_sibling;
+        ASSERT_NE(low, nullptr);
+        // The low bound must never be a `=` comparison absorbed into the bound.
+        const bool low_is_comparison =
+            (low->node_type == NodeType::BinaryExpr && low->primary_text == "=");
+        EXPECT_FALSE(low_is_comparison);
+    }
+}
+
+TEST_F(ExprHardeningTest, BetweenTrailingAndStillTerminates) {
+    // `x BETWEEN a AND b AND c` must be `(x BETWEEN a AND b) AND c`.
+    auto* ast = parse("SELECT * FROM t WHERE x BETWEEN a AND b AND c");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "AND");
+    auto* left = pred->first_child;
+    ASSERT_NE(left, nullptr);
+    EXPECT_EQ(left->node_type, NodeType::BetweenExpr);
+}
+
+// ---- get_children() nested traversal safety --------------------------------
+
+TEST_F(ExprHardeningTest, NestedGetChildrenTraversalIsSafe) {
+    auto* ast = parse("SELECT a, b, c FROM t WHERE x = 1 AND y = 2");
+    ASSERT_NE(ast, nullptr);
+
+    // Nested traversal: for each child, iterate its children while the outer
+    // iteration is still live. With a shared thread-local buffer this corrupts
+    // the outer span; with an owning return value it is correct.
+    int total_grandchildren = 0;
+    int outer_seen = 0;
+    for (auto* child : ast->get_children()) {
+        outer_seen++;
+        int inner = 0;
+        for (auto* gc : child->get_children()) {
+            (void)gc;
+            inner++;
+        }
+        total_grandchildren += inner;
+        // The outer collection must remain valid/consistent across inner loops.
+        EXPECT_NE(child, nullptr);
+    }
+    // Sanity: we actually visited the top-level children and some grandchildren.
+    EXPECT_GT(outer_seen, 0);
+    EXPECT_GT(total_grandchildren, 0);
+
+    // Cross-check: the number of children we iterated equals child_count.
+    EXPECT_EQ(static_cast<uint32_t>(outer_seen), ast->child_count);
+}

@@ -166,7 +166,8 @@ if(BUILD_TESTS)
     
     add_parser_test(test_sql_operators tests/test_sql_operators.cpp)
     add_parser_test(test_precedence_regression tests/test_precedence_regression.cpp)
-    
+    add_parser_test(test_parser_expr_hardening tests/test_parser_expr_hardening.cpp)
+
     add_parser_test(test_group_by tests/test_group_by.cpp)
     
     add_parser_test(test_case_expr tests/test_case_expr.cpp)
@@ -230,7 +231,10 @@ if(BUILD_TESTS)
 
     # DepthGuard security test - recursion depth protection against stack overflow
     add_parser_test(test_depth_guard tests/security/test_depth_guard.cpp)
-    
+
+    # Negative-path tests - malformed SQL returns an error Result without crashing
+    add_parser_test(test_parser_negative tests/test_parser_negative.cpp)
+
     # Add custom target for generating visual dumps
     add_custom_target(generate_ast_dumps
         COMMAND test_ast_dump --save --verbose

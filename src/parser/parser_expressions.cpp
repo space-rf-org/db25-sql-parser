@@ -104,6 +104,33 @@ ast::ASTNode* Parser::parse_primary_expression() {
         }
     }
     
+    // Handle bind parameters: positional '?' and numbered '$1', '$2', ...
+    // The tokenizer emits '?' as a single Operator token, and '$1' as an
+    // Operator '$' immediately followed by a Number token. Both are turned
+    // into a single Parameter node whose primary_text holds the placeholder.
+    if (current_token_->type == tokenizer::TokenType::Operator &&
+        current_token_->value == "?") {
+        auto* param = arena_.allocate<ast::ASTNode>();
+        new (param) ast::ASTNode(ast::NodeType::Parameter);
+        param->node_id = next_node_id_++;
+        param->primary_text = copy_to_arena("?");
+        advance(); // consume '?'
+        return param;
+    }
+    if (current_token_->type == tokenizer::TokenType::Operator &&
+        current_token_->value == "$" &&
+        peek_token_ && peek_token_->type == tokenizer::TokenType::Number) {
+        advance(); // consume '$'
+        std::string placeholder = "$";
+        placeholder += std::string(current_token_->value);
+        auto* param = arena_.allocate<ast::ASTNode>();
+        new (param) ast::ASTNode(ast::NodeType::Parameter);
+        param->node_id = next_node_id_++;
+        param->primary_text = copy_to_arena(placeholder);
+        advance(); // consume the number
+        return param;
+    }
+
     // Handle unary - or +
     if (current_token_->type == tokenizer::TokenType::Operator &&
         (current_token_->value == "-" || current_token_->value == "+")) {
@@ -561,17 +588,25 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
         if (token_type == tokenizer::TokenType::Keyword) {
             // BETWEEN x AND y (or NOT BETWEEN x AND y)
             if (op_keyword_id == db25::Keyword::BETWEEN) {
-                auto* lower = parse_expression(precedence + 1);
+                // BETWEEN bounds are value expressions: they must bind TIGHTER
+                // than comparison so `x BETWEEN a = c AND b` does not fold the
+                // low bound into `(a = c)`. Comparison is precedence 4
+                // (PREC_COMP), so parse bounds at PREC_COMP + 1. This still
+                // stops at the `AND` separator (precedence 2) and leaves any
+                // trailing `AND c` to the outer loop, so
+                // `x BETWEEN a AND b AND c` stays `(x BETWEEN a AND b) AND c`.
+                constexpr int kBetweenBoundPrec = 5; // PREC_COMP + 1
+                auto* lower = parse_expression(kBetweenBoundPrec);
                 if (!lower) return left;
-                
+
                 // Expect AND
                 if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
                     current_token_->keyword_id != db25::Keyword::AND) {
                     return left; // Error: missing AND
                 }
                 advance(); // consume AND
-                
-                auto* upper = parse_expression(precedence + 1);
+
+                auto* upper = parse_expression(kBetweenBoundPrec);
                 if (!upper) return left;
                 
                 // Create BETWEEN node
