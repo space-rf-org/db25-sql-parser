@@ -156,18 +156,17 @@ ParseResult Parser::parse(std::string_view sql) {
 std::expected<std::vector<ast::ASTNode*>, ParseError>
 Parser::parse_script(std::string_view sql) {
     std::vector<ast::ASTNode*> statements;
-    
-    // Initialize parser state
-    input_ = sql;
-    current_depth_ = 0;
-    next_node_id_ = 1;
-    parenthesis_depth_ = 0;
-    depth_exceeded_ = false;
-    has_error_ = false;
-    error_message_.clear();
 
-    // Create tokenizer with the new input
-    delete tokenizer_;  // Clean up any previous tokenizer
+    // Reset all parser state, including the arena. A script parses MULTIPLE
+    // statements into ONE arena (we do not reset between statements in the loop
+    // below), but a fresh parse_script() CALL must start clean like parse():
+    // without arena_.reset() a prior parse()/parse_script() left its nodes in
+    // the arena, so restarting next_node_id_ at 1 produced duplicate node ids
+    // and the arena grew without bound across calls.
+    reset();
+    input_ = sql;
+
+    // Create tokenizer with the new input (reset() already released any prior one)
     tokenizer_ = new tokenizer::Tokenizer(input_);
     
     // Get initial tokens

@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -182,4 +183,45 @@ TEST_F(AstLifetimeTest, SecondParseYieldsValidAst) {
     for (const ASTNode* n : all_nodes(root)) {
         EXPECT_FALSE(points_into(n->primary_text, second_sql));
     }
+}
+
+// Regression: a fresh parse_script() CALL must reset the arena once at the
+// start (like parse() does). Previously it only reset next_node_id_ to 1 while
+// leaving prior nodes in the arena, so a parse() followed by parse_script(),
+// and repeated parse_script() calls, produced duplicate node ids and let the
+// arena grow without bound. We observe both invariants:
+//   - node ids in each script start at 1 and are unique
+//   - identical repeated calls do not grow arena memory
+TEST_F(AstLifetimeTest, ParseScriptResetsArenaEachCall) {
+    const std::string script = "SELECT a FROM t; SELECT b FROM u;";
+
+    // Prime the arena with a prior parse() so leftover nodes would linger
+    // without a reset.
+    auto primed = parser.parse("SELECT primed_col FROM primed_table");
+    ASSERT_TRUE(primed.has_value());
+
+    auto first = parser.parse_script(script);
+    ASSERT_TRUE(first.has_value());
+    const size_t mem_after_first = parser.get_memory_used();
+
+    // Node ids across the whole script must be unique and start at 1.
+    std::set<uint32_t> ids;
+    uint32_t min_id = UINT32_MAX;
+    for (auto* stmt : first.value()) {
+        for (const ASTNode* n : all_nodes(stmt)) {
+            EXPECT_TRUE(ids.insert(n->node_id).second) << "duplicate node id " << n->node_id;
+            min_id = std::min(min_id, n->node_id);
+        }
+    }
+    EXPECT_EQ(min_id, 1u);
+
+    // A second identical call must reset the arena, so memory does not grow.
+    auto second = parser.parse_script(script);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(parser.get_memory_used(), mem_after_first);
+
+    // And a third call after the same-input churn stays flat too.
+    auto third = parser.parse_script(script);
+    ASSERT_TRUE(third.has_value());
+    EXPECT_EQ(parser.get_memory_used(), mem_after_first);
 }

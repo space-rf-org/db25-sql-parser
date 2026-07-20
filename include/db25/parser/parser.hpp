@@ -28,16 +28,6 @@
 
 namespace db25::parser {
 
-// Forward declarations for internal classes
-namespace internal {
-    class ParserAccess;
-    class DDLParser;
-    class DMLParser;
-    class SelectParser;
-    class ExpressionParser;
-    class UtilityParser;
-}
-
 /**
  * Error information for parse failures
  */
@@ -85,14 +75,6 @@ struct ParserConfig {
  *   }
  */
 class Parser {
-    // Friend declarations for internal parser modules
-    friend class internal::ParserAccess;
-    friend class internal::DDLParser;
-    friend class internal::DMLParser;
-    friend class internal::SelectParser;
-    friend class internal::ExpressionParser;
-    friend class internal::UtilityParser;
-    
 public:
     // ========== Construction ==========
     
@@ -149,7 +131,7 @@ public:
     [[nodiscard]] const ParserConfig& config() const noexcept { return config_; }
     void set_config(const ParserConfig& config) { config_ = config; }
     
-protected:  // Changed from private to allow friend class access
+protected:
     // ========== Depth Guard ==========
     
     /**
