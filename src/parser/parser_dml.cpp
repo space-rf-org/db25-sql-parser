@@ -239,54 +239,31 @@ ast::ASTNode* Parser::parse_insert_stmt() {
         }
     }
     
-    // Optional ON CONFLICT clause (for UPSERT)
+    // Optional ON CONFLICT clause (for UPSERT). Delegate to the fully
+    // implemented helper, which parses the conflict target column list and the
+    // DO UPDATE SET assignments (the previous inline version stubbed both out).
     if (current_token_ && current_token_->keyword_id == db25::Keyword::ON) {
-        size_t save_pos = tokenizer_ ? tokenizer_->position() : 0;
-        const tokenizer::Token* save_token = current_token_;
-        
-        advance();  // consume ON
-        if (current_token_ && current_token_->value == "CONFLICT") {
-            advance();  // consume CONFLICT
-            
-            auto* on_conflict = arena_.allocate<ast::ASTNode>();
-            new (on_conflict) ast::ASTNode(ast::NodeType::OnConflictClause);
-            on_conflict->node_id = next_node_id_++;
-            
-            // Parse conflict target (optional)
-            if (current_token_ && current_token_->value == "(") {
-                // Parse column list for conflict target
-                // TODO: Implement conflict target parsing
-            }
-            
-            // Parse conflict action
-            if (current_token_ && current_token_->keyword_id == db25::Keyword::DO) {
-                advance();  // consume DO
-                
-                if (current_token_ && current_token_->value == "NOTHING") {
-                    advance();  // consume NOTHING
-                    on_conflict->semantic_flags |= 0x01;  // DO NOTHING flag
-                } else if (current_token_ && current_token_->keyword_id == db25::Keyword::UPDATE) {
-                    advance();  // consume UPDATE
-                    on_conflict->semantic_flags |= 0x02;  // DO UPDATE flag
-                    
-                    if (current_token_ && current_token_->keyword_id == db25::Keyword::SET) {
-                        advance();  // consume SET
-                        // Parse SET clauses
-                        // TODO: Implement SET clause parsing for ON CONFLICT DO UPDATE
-                    }
-                }
-            }
-            
+        auto* on_conflict = parse_on_conflict_clause();
+        if (on_conflict) {
             on_conflict->parent = insert_node;
             last_child->next_sibling = on_conflict;
+            last_child = on_conflict;
             insert_node->child_count++;
-        } else {
-            // Not ON CONFLICT, restore position
-            current_token_ = save_token;
-            if (tokenizer_) tokenizer_->set_position(save_pos);
         }
     }
-    
+
+    // Optional RETURNING clause (PostgreSQL extension). The helper already
+    // gates on keyword_id, so lowercase "returning" is honored.
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::RETURNING) {
+        auto* returning_clause = parse_returning_clause();
+        if (returning_clause) {
+            returning_clause->parent = insert_node;
+            last_child->next_sibling = returning_clause;
+            last_child = returning_clause;
+            insert_node->child_count++;
+        }
+    }
+
     return insert_node;
 }
 
@@ -422,7 +399,7 @@ ast::ASTNode* Parser::parse_update_stmt() {
     }
     
     // Optional RETURNING clause (PostgreSQL extension)
-    if (current_token_ && current_token_->value == "RETURNING") {
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::RETURNING) {
         advance();  // consume RETURNING
         
         auto* returning_clause = arena_.allocate<ast::ASTNode>();
@@ -505,7 +482,7 @@ ast::ASTNode* Parser::parse_delete_stmt() {
     ast::ASTNode* last_child = table_ref;
     
     // Optional USING clause (PostgreSQL extension)
-    if (current_token_ && current_token_->value == "USING") {
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::USING) {
         advance();  // consume USING
         
         auto* using_clause = arena_.allocate<ast::ASTNode>();
@@ -556,7 +533,7 @@ ast::ASTNode* Parser::parse_delete_stmt() {
     }
     
     // Optional RETURNING clause (PostgreSQL extension)
-    if (current_token_ && current_token_->value == "RETURNING") {
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::RETURNING) {
         advance();  // consume RETURNING
         
         auto* returning_clause = arena_.allocate<ast::ASTNode>();
@@ -611,7 +588,7 @@ ast::ASTNode* Parser::parse_delete_stmt() {
 
 ast::ASTNode* Parser::parse_returning_clause() {
     // RETURNING clause implementation
-    if (!current_token_ || current_token_->value != "RETURNING") {
+    if (!current_token_ || current_token_->keyword_id != db25::Keyword::RETURNING) {
         return nullptr;
     }
     advance();  // consume RETURNING
@@ -669,7 +646,7 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
     
     advance();  // consume ON
     
-    if (!current_token_ || current_token_->value != "CONFLICT") {
+    if (!current_token_ || current_token_->keyword_id != db25::Keyword::CONFLICT) {
         // Not ON CONFLICT, restore
         current_token_ = save_token;
         if (tokenizer_) tokenizer_->set_position(save_pos);
@@ -727,7 +704,7 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
     if (current_token_ && current_token_->keyword_id == db25::Keyword::DO) {
         advance();  // consume DO
         
-        if (current_token_ && current_token_->value == "NOTHING") {
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::NOTHING) {
             advance();  // consume NOTHING
             on_conflict->semantic_flags |= 0x01;  // DO NOTHING flag
         } else if (current_token_ && current_token_->keyword_id == db25::Keyword::UPDATE) {
@@ -801,7 +778,7 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
 
 ast::ASTNode* Parser::parse_using_clause() {
     // USING clause for DELETE/UPDATE
-    if (!current_token_ || current_token_->value != "USING") {
+    if (!current_token_ || current_token_->keyword_id != db25::Keyword::USING) {
         return nullptr;
     }
     advance();  // consume USING

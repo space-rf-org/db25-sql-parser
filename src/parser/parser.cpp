@@ -140,6 +140,31 @@ ParseResult Parser::parse(std::string_view sql) {
         });
     }
     
+    // Trailing-input detection (lenient): the statement parsed successfully,
+    // but the parser may have stopped before consuming all input. Record how
+    // many significant tokens remain so callers can detect silent truncation
+    // via has_trailing_input()/trailing_token_count(). This intentionally does
+    // NOT turn trailing input into a parse failure (that regressed ~8 suites);
+    // success is preserved. A single trailing ';' terminator is not counted.
+    if (tokenizer_) {
+        const auto& tokens = tokenizer_->get_tokens();
+        size_t idx = tokenizer_->position();
+        // Skip exactly one trailing statement terminator ';'.
+        if (idx < tokens.size() &&
+            tokens[idx].type == tokenizer::TokenType::Delimiter &&
+            tokens[idx].value == ";") {
+            ++idx;
+        }
+        size_t remaining = 0;
+        for (; idx < tokens.size(); ++idx) {
+            if (tokens[idx].type == tokenizer::TokenType::EndOfFile) {
+                continue;
+            }
+            ++remaining;
+        }
+        trailing_token_count_ = remaining;
+    }
+
     // All AST node strings are copied into the parser's arena via
     // copy_to_arena(), so they no longer alias the tokenizer's token buffer.
     // The tokenizer can therefore be released here (matching the error paths)
@@ -229,6 +254,7 @@ void Parser::reset() {
     depth_exceeded_ = false;  // Reset depth exceeded flag
     has_error_ = false;       // Reset recoverable error state
     error_message_.clear();
+    trailing_token_count_ = 0; // Reset trailing-input diagnostic
     delete tokenizer_;  // Safe even if nullptr
     tokenizer_ = nullptr;
     current_token_ = nullptr;

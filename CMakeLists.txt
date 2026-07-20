@@ -207,6 +207,10 @@ if(BUILD_TESTS)
 
     # DML Statements test (INSERT column lists, UPDATE/DELETE WHERE, LIMIT, literals)
     add_parser_test(test_parser_dml tests/test_parser_dml.cpp gtest)
+
+    # Parser correctness round 2 (schema-qualified tables, trailing-input
+    # detection, case-insensitive DML keywords, INSERT RETURNING/ON CONFLICT)
+    add_parser_test(test_parser_correctness_round2 tests/test_parser_correctness_round2.cpp gtest)
     
     # SQL Completion test
     add_parser_test_no_gtest(test_sql_completion tests/test_sql_completion.cpp)
