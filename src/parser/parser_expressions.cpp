@@ -114,13 +114,14 @@ ast::ASTNode* Parser::parse_primary_expression() {
         if (peek_token_ && peek_token_->type == tokenizer::TokenType::Number && op == "-") {
             // For negative numbers, just parse as number with minus
             advance(); // consume -
-            auto* num = arena_.allocate<ast::ASTNode>();
-            new (num) ast::ASTNode(ast::NodeType::IntegerLiteral);
-            num->node_id = next_node_id_++;
-            
             // Combine - with number
             std::string combined = "-";
             combined += std::string(current_token_->value);
+
+            auto* num = arena_.allocate<ast::ASTNode>();
+            new (num) ast::ASTNode(internal::number_literal_type(combined));
+            num->node_id = next_node_id_++;
+
             num->primary_text = copy_to_arena(combined);
             advance();
             return num;
@@ -149,9 +150,9 @@ ast::ASTNode* Parser::parse_primary_expression() {
     // Handle numbers
     if (current_token_->type == tokenizer::TokenType::Number) {
         auto* num = arena_.allocate<ast::ASTNode>();
-        new (num) ast::ASTNode(ast::NodeType::IntegerLiteral);
+        new (num) ast::ASTNode(internal::number_literal_type(current_token_->value));
         num->node_id = next_node_id_++;
-        
+
         num->primary_text = copy_to_arena(current_token_->value);
         advance();
         return num;

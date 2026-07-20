@@ -368,10 +368,10 @@ TEST_F(ParserCorrectnessTest, LiteralTypes) {
     EXPECT_EQ(lit2->node_type, NodeType::StringLiteral);
     EXPECT_EQ(lit2->primary_text, "'hello'");
     
-    // Third item should be number (parsed as integer for now)
+    // Third item is a decimal number and should be a float literal
     auto* lit3 = lit2->next_sibling;
     ASSERT_NE(lit3, nullptr);
-    EXPECT_EQ(lit3->node_type, NodeType::IntegerLiteral);
+    EXPECT_EQ(lit3->node_type, NodeType::FloatLiteral);
     EXPECT_EQ(lit3->primary_text, "3.14");
 }
 
