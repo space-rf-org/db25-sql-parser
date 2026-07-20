@@ -45,8 +45,8 @@ ast::ASTNode* Parser::parse_insert_stmt() {
     ast::ASTNode* last_child = table_ref;
     
     // Optional column list: (col1, col2, ...)
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Operator &&
-        current_token_->value == "(") {
+    // NB: '(' is tokenized as a Delimiter, so match on the value only.
+    if (current_token_ && current_token_->value == "(") {
         
         // Check if it's a column list or VALUES by looking ahead
         // Column list is followed by ) then VALUES/SELECT/DEFAULT
