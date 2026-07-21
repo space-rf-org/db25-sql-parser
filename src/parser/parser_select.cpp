@@ -472,64 +472,111 @@ ast::ASTNode* Parser::parse_select_stmt() {
     if (is_setop_rhs) {
         return select_node;
     }
-    while (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
-        std::string_view keyword = current_token_->value;
-        if (!(keyword == "UNION" || keyword == "union" ||
-              keyword == "INTERSECT" || keyword == "intersect" ||
-              keyword == "EXCEPT" || keyword == "except" ||
-              keyword == "MINUS" || keyword == "minus")) {
-            break;  // not a set operator: done folding
-        }
+    //
+    // Set operations have TWO precedence levels (SQL standard; matches
+    // Postgres/Oracle/SQL Server/DuckDB/SQLite): INTERSECT binds TIGHTER than
+    // UNION / EXCEPT / MINUS. So `A UNION B INTERSECT C` parses as
+    // `A UNION (B INTERSECT C)`. Within a single level operators fold LEFT-
+    // associatively (`A UNION B UNION C` -> `(A UNION B) UNION C`).
+    //
+    //   union_level    := intersect_level ( (UNION|EXCEPT|MINUS) [ALL] intersect_level )*
+    //   intersect_level:= <select> ( INTERSECT [ALL] <select> )*
+    //
+    // Both levels take a bare single SELECT (or parenthesized query block) as
+    // their operand, obtained by re-entering parse_select_stmt() under the
+    // in_setop_rhs_ guard so the nested call returns its branch without folding
+    // its own set-op tail (this loop owns the folding).
 
-        // Create the set operation node.
-        ast::NodeType set_op_type;
-        if (keyword == "UNION" || keyword == "union") {
-            set_op_type = ast::NodeType::UnionStmt;
-        } else if (keyword == "INTERSECT" || keyword == "intersect") {
-            set_op_type = ast::NodeType::IntersectStmt;
-        } else {
-            set_op_type = ast::NodeType::ExceptStmt;
-        }
-
-        auto* set_op_node = arena_.allocate<ast::ASTNode>();
-        new (set_op_node) ast::ASTNode(set_op_type);
-        set_op_node->node_id = next_node_id_++;
-        set_op_node->primary_text = copy_to_arena(keyword);
-
-        advance(); // consume set operation keyword
-
-        // Check for ALL
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-            (current_token_->keyword_id == db25::Keyword::ALL)) {
-            set_op_node->flags = set_op_node->flags | ast::NodeFlags::All;
-            advance();
-        }
-
-        // Parse the right-hand branch as a SINGLE SELECT (no set-op tail): the
-        // in_setop_rhs_ guard makes the nested parse_select_stmt return the bare
-        // branch, so THIS loop is what folds successive operators left.
-        ast::ASTNode* right_select = nullptr;
+    // Parse one bare operand: a SELECT with no set-op tail of its own.
+    auto parse_setop_operand = [&]() -> ast::ASTNode* {
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
             (current_token_->keyword_id == db25::Keyword::SELECT)) {
             in_setop_rhs_ = true;
-            right_select = parse_select_stmt();
+            auto* branch = parse_select_stmt();
             in_setop_rhs_ = false;
+            return branch;
+        }
+        return nullptr;
+    };
+
+    // Build a 2-child set-operation node of the given kind over left/right.
+    auto make_setop_node = [&](std::string_view keyword, ast::NodeType type,
+                               ast::ASTNode* left, ast::ASTNode* right,
+                               bool all) -> ast::ASTNode* {
+        auto* node = arena_.allocate<ast::ASTNode>();
+        new (node) ast::ASTNode(type);
+        node->node_id = next_node_id_++;
+        node->primary_text = copy_to_arena(keyword);
+        if (all) {
+            node->flags = node->flags | ast::NodeFlags::All;
+        }
+        left->parent = node;
+        right->parent = node;
+        node->first_child = left;
+        left->next_sibling = right;
+        node->child_count = 2;
+        return node;
+    };
+
+    // Higher-precedence level: fold a left-deep chain of INTERSECT onto `left`.
+    auto fold_intersects = [&](ast::ASTNode* left) -> ast::ASTNode* {
+        while (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
+            std::string_view keyword = current_token_->value;
+            if (!(keyword == "INTERSECT" || keyword == "intersect")) {
+                break;  // not INTERSECT: hand back to the union level
+            }
+            advance(); // consume INTERSECT
+            bool all = false;
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                (current_token_->keyword_id == db25::Keyword::ALL)) {
+                all = true;
+                advance();
+            }
+            ast::ASTNode* right = parse_setop_operand();
+            if (!right) {
+                break;  // malformed RHS: keep the tree folded so far
+            }
+            left = make_setop_node(keyword, ast::NodeType::IntersectStmt, left, right, all);
+        }
+        return left;
+    };
+
+    // Lower-precedence level: fold UNION / EXCEPT / MINUS left-associatively,
+    // each operand first extended by any INTERSECT chain so INTERSECT groups
+    // before UNION / EXCEPT.
+    ast::ASTNode* left = fold_intersects(select_node);
+    while (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
+        std::string_view keyword = current_token_->value;
+        ast::NodeType set_op_type;
+        if (keyword == "UNION" || keyword == "union") {
+            set_op_type = ast::NodeType::UnionStmt;
+        } else if (keyword == "EXCEPT" || keyword == "except" ||
+                   keyword == "MINUS" || keyword == "minus") {
+            set_op_type = ast::NodeType::ExceptStmt;
+        } else {
+            break;  // not a union-level operator (INTERSECT already folded): done
         }
 
-        if (!right_select) {
+        advance(); // consume set operation keyword
+
+        bool all = false;
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+            (current_token_->keyword_id == db25::Keyword::ALL)) {
+            all = true;
+            advance();
+        }
+
+        ast::ASTNode* right_operand = parse_setop_operand();
+        if (!right_operand) {
             // Malformed right-hand side: keep the tree folded so far.
             break;
         }
+        // The RHS binds any trailing INTERSECT chain before we fold at this level.
+        ast::ASTNode* right = fold_intersects(right_operand);
 
-        // Fold left: the accumulated tree becomes the left child of this node,
-        // which in turn becomes the accumulated tree for the next iteration.
-        select_node->parent = set_op_node;
-        right_select->parent = set_op_node;
-        set_op_node->first_child = select_node;
-        select_node->next_sibling = right_select;
-        set_op_node->child_count = 2;
-        select_node = set_op_node;
+        left = make_setop_node(keyword, set_op_type, left, right, all);
     }
+    select_node = left;
     
     // Consume any trailing semicolon
     if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&

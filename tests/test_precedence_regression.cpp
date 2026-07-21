@@ -143,6 +143,63 @@ TEST_F(PrecedenceRegressionTest, UnionChainLeftAssociative) {
     EXPECT_EQ(ast->first_child->node_type, NodeType::UnionStmt);
 }
 
+// INTERSECT binds TIGHTER than UNION (SQL standard; matches Postgres/Oracle/
+// SQL Server/DuckDB/SQLite): `A UNION B INTERSECT C` -> `A UNION (B INTERSECT C)`.
+// The root must be UNION and its RIGHT child the INTERSECT (regression: the old
+// single-level fold produced root=INTERSECT / left=UNION, i.e. `(A UNION B) INTERSECT C`).
+TEST_F(PrecedenceRegressionTest, IntersectBindsTighterThanUnion) {
+    auto* ast = parse("SELECT 1 UNION SELECT 2 INTERSECT SELECT 3");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::UnionStmt);        // root is UNION
+    auto* left = ast->first_child;
+    auto* right = left ? left->next_sibling : nullptr;
+    ASSERT_NE(left, nullptr);
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(left->node_type, NodeType::SelectStmt);      // A on the left
+    EXPECT_EQ(right->node_type, NodeType::IntersectStmt);  // (B INTERSECT C) on the right
+}
+
+// Same precedence rule from the other side: `A INTERSECT B UNION C` ->
+// `(A INTERSECT B) UNION C`. Root is UNION with the INTERSECT as its LEFT child.
+TEST_F(PrecedenceRegressionTest, IntersectGroupsBeforeUnionOnLeft) {
+    auto* ast = parse("SELECT 1 INTERSECT SELECT 2 UNION SELECT 3");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::UnionStmt);        // root is UNION
+    auto* left = ast->first_child;
+    auto* right = left ? left->next_sibling : nullptr;
+    ASSERT_NE(left, nullptr);
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(left->node_type, NodeType::IntersectStmt);   // (A INTERSECT B) on the left
+    EXPECT_EQ(right->node_type, NodeType::SelectStmt);     // C on the right
+}
+
+// Control: INTERSECT is left-associative among itself, exactly like UNION.
+// `A INTERSECT B INTERSECT C` -> `(A INTERSECT B) INTERSECT C` (left-deep). This
+// proves the precedence restructure did not break same-level associativity.
+TEST_F(PrecedenceRegressionTest, IntersectChainLeftAssociative) {
+    auto* ast = parse("SELECT 1 INTERSECT SELECT 2 INTERSECT SELECT 3");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::IntersectStmt);
+    auto* left = ast->first_child;
+    auto* right = left ? left->next_sibling : nullptr;
+    ASSERT_NE(left, nullptr);
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(left->node_type, NodeType::IntersectStmt);   // (A INTERSECT B) on the left
+    EXPECT_EQ(right->node_type, NodeType::SelectStmt);     // C on the right
+}
+
+// The ALL modifier must ride on the correct operator after the restructure:
+// `A UNION ALL B INTERSECT C` -> UNION(ALL) whose right child is the INTERSECT.
+TEST_F(PrecedenceRegressionTest, UnionAllModifierSurvivesIntersectRegroup) {
+    auto* ast = parse("SELECT 1 UNION ALL SELECT 2 INTERSECT SELECT 3");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::UnionStmt);
+    EXPECT_TRUE(ast->has_flag(NodeFlags::All));            // ALL stayed on UNION
+    auto* right = ast->first_child ? ast->first_child->next_sibling : nullptr;
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(right->node_type, NodeType::IntersectStmt);
+}
+
 // GROUP BY with a missing item must not crash (regression: the old code called
 // global delete on an arena-allocated node -> UB). The parser is lenient, so it
 // still returns a SelectStmt; the point is that it completes cleanly (and does
