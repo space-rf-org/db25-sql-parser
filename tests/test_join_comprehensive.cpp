@@ -101,11 +101,41 @@ TEST_F(JoinComprehensiveTest, FullOuterJoin) {
 TEST_F(JoinComprehensiveTest, CrossJoin) {
     auto* ast = parse("SELECT * FROM users CROSS JOIN orders");
     ASSERT_NE(ast, nullptr);
-    
+
     auto* join = find_node_by_type(ast, NodeType::JoinClause);
     ASSERT_NE(join, nullptr);
     EXPECT_EQ(join->primary_text, "CROSS JOIN");
     EXPECT_EQ(join->child_count, 1); // only table, no ON condition
+}
+
+TEST_F(JoinComprehensiveTest, NaturalJoin) {
+    // Regression: NATURAL JOIN was previously dropped entirely (the join clause
+    // and its right relation never reached the AST). It must now parse to a
+    // JoinClause carrying only the right table (no ON / USING - the join columns
+    // are the common columns, resolved downstream).
+    auto* ast = parse("SELECT id FROM users NATURAL JOIN orders");
+    ASSERT_NE(ast, nullptr);
+
+    auto* join = find_node_by_type(ast, NodeType::JoinClause);
+    ASSERT_NE(join, nullptr);
+    EXPECT_EQ(join->primary_text, "NATURAL JOIN");
+    EXPECT_EQ(join->child_count, 1); // only the right table
+
+    auto* rel = join->first_child;
+    ASSERT_NE(rel, nullptr);
+    EXPECT_EQ(rel->node_type, NodeType::TableRef);
+    EXPECT_EQ(rel->primary_text, "orders");
+}
+
+TEST_F(JoinComprehensiveTest, NaturalLeftJoin) {
+    // NATURAL composes with an outer-join prefix: NATURAL LEFT JOIN.
+    auto* ast = parse("SELECT id FROM users NATURAL LEFT JOIN orders");
+    ASSERT_NE(ast, nullptr);
+
+    auto* join = find_node_by_type(ast, NodeType::JoinClause);
+    ASSERT_NE(join, nullptr);
+    EXPECT_EQ(join->primary_text, "NATURAL LEFT JOIN");
+    EXPECT_EQ(join->child_count, 1);
 }
 
 TEST_F(JoinComprehensiveTest, MultipleJoins) {
