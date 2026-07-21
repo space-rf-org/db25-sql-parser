@@ -676,7 +676,8 @@ ast::ASTNode* Parser::parse_from_clause() {
                            kw == "RIGHT" || kw == "right" ||
                            kw == "INNER" || kw == "inner" ||
                            kw == "FULL" || kw == "full" ||
-                           kw == "CROSS" || kw == "cross");
+                           kw == "CROSS" || kw == "cross" ||
+                           kw == "NATURAL" || kw == "natural");
             
             if (is_join) {
                 auto* join_clause = parse_join_clause();
@@ -710,7 +711,17 @@ ast::ASTNode* Parser::parse_join_clause() {
     // Store JOIN type (LEFT, RIGHT, INNER, etc.)
     std::string join_type;
     
-    // Handle JOIN type prefixes (LEFT, RIGHT, INNER, FULL, CROSS)
+    // Optional NATURAL prefix: NATURAL [INNER | LEFT [OUTER] | RIGHT [OUTER] |
+    // FULL [OUTER]] JOIN. A NATURAL join carries no ON / USING clause; its join
+    // columns are every column common to both inputs, resolved downstream.
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        current_token_->keyword_id == db25::Keyword::NATURAL) {
+        join_type = "NATURAL";
+        advance(); // consume NATURAL
+    }
+
+    // Handle JOIN type prefixes (LEFT, RIGHT, INNER, FULL, CROSS), which may
+    // follow a NATURAL prefix (NATURAL LEFT JOIN).
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
         const auto& kw = current_token_->value;
         if (kw == "LEFT" || kw == "left" ||
@@ -718,9 +729,12 @@ ast::ASTNode* Parser::parse_join_clause() {
             kw == "INNER" || kw == "inner" ||
             kw == "FULL" || kw == "full" ||
             kw == "CROSS" || kw == "cross") {
-            join_type = kw;
+            if (!join_type.empty()) {
+                join_type += " ";
+            }
+            join_type += kw;
             advance(); // consume JOIN type
-            
+
             // Also handle OUTER keyword (LEFT OUTER JOIN)
             if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
                 current_token_->keyword_id == db25::Keyword::OUTER) {
