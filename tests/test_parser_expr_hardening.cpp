@@ -233,3 +233,41 @@ TEST_F(ExprHardeningTest, DecimalStaysFloatIntegerStaysInteger) {
     ASSERT_NE(find(i, NodeType::IntegerLiteral), nullptr);
     EXPECT_EQ(find(i, NodeType::FloatLiteral), nullptr);
 }
+
+// ---- Delimited (double-quoted) identifiers ---------------------------------
+// A double-quoted lexeme is a delimited identifier, so it must reach the parser
+// as a column reference carrying the bare inner text - not a string literal.
+
+TEST_F(ExprHardeningTest, DelimitedIdentifierIsColumnRef) {
+    auto* ast = parse("SELECT \"id\" FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* col = find(ast, NodeType::ColumnRef);
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->primary_text, "id");
+    // It must not have been lexed as a string literal.
+    EXPECT_EQ(find(ast, NodeType::StringLiteral), nullptr);
+}
+
+TEST_F(ExprHardeningTest, DelimitedIdentifierPreservesSpaceAndCase) {
+    auto* ast = parse("SELECT \"User Name\" FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* col = find(ast, NodeType::ColumnRef);
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->primary_text, "User Name");
+}
+
+TEST_F(ExprHardeningTest, DelimitedKeywordIsIdentifierNotKeyword) {
+    // "select" in quotes is a column named select, not the SELECT keyword.
+    auto* ast = parse("SELECT \"select\" FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* col = find(ast, NodeType::ColumnRef);
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->primary_text, "select");
+}
+
+TEST_F(ExprHardeningTest, SingleQuotedStaysStringLiteral) {
+    // Regression guard: single quotes remain a string literal, not an identifier.
+    auto* ast = parse("SELECT 'id' FROM t");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_NE(find(ast, NodeType::StringLiteral), nullptr);
+}
