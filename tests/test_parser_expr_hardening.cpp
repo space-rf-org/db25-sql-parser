@@ -271,3 +271,35 @@ TEST_F(ExprHardeningTest, SingleQuotedStaysStringLiteral) {
     ASSERT_NE(ast, nullptr);
     EXPECT_NE(find(ast, NodeType::StringLiteral), nullptr);
 }
+
+// ---- COLLATE postfix -------------------------------------------------------
+// `<value> COLLATE <name>` annotates a value with a collation. It must parse as
+// a CollateClause wrapping the value, with the collation name recorded, instead
+// of derailing the surrounding expression (which used to drop the column).
+
+TEST_F(ExprHardeningTest, CollateInProjection) {
+    auto* ast = parse("SELECT name COLLATE \"C\" FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* col = find(ast, NodeType::CollateClause);
+    ASSERT_NE(col, nullptr);
+    EXPECT_EQ(col->schema_name, "C");
+    // The annotated value is its child column reference.
+    auto* operand = col->first_child;
+    ASSERT_NE(operand, nullptr);
+    EXPECT_EQ(operand->node_type, NodeType::ColumnRef);
+    EXPECT_EQ(operand->primary_text, "name");
+}
+
+TEST_F(ExprHardeningTest, CollateBindsTighterThanComparison) {
+    // `s COLLATE "C" = 'a'` is `(s COLLATE "C") = 'a'`: the '=' predicate's left
+    // operand is the CollateClause, and the column is not lost.
+    auto* ast = parse("SELECT * FROM t WHERE s COLLATE \"C\" = 'a'");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "=");
+    auto* lhs = pred->first_child;
+    ASSERT_NE(lhs, nullptr);
+    EXPECT_EQ(lhs->node_type, NodeType::CollateClause);
+}
