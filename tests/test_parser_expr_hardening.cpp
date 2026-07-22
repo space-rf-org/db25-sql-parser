@@ -177,3 +177,59 @@ TEST_F(ExprHardeningTest, NestedGetChildrenTraversalIsSafe) {
     // Cross-check: the number of children we iterated equals child_count.
     EXPECT_EQ(static_cast<uint32_t>(outer_seen), ast->child_count);
 }
+
+// ---- Numeric literal node types --------------------------------------------
+// The tokenizer now lexes hex (0x..) / binary (0b..) integers and leading-dot
+// floats (.5) as single Number tokens; the parser must classify them into the
+// right literal node. In particular a hex literal is an INTEGER even when its
+// digits include 'e'/'E' (0xBEEF), which the naive exponent check misread as a
+// float.
+
+TEST_F(ExprHardeningTest, HexLiteralIsInteger) {
+    auto* ast = parse("SELECT 0xFF FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* lit = find(ast, NodeType::IntegerLiteral);
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->primary_text, "0xFF");
+    EXPECT_EQ(find(ast, NodeType::FloatLiteral), nullptr);
+}
+
+TEST_F(ExprHardeningTest, HexLiteralWithHexEIsInteger) {
+    // Regression: 'e'/'E' are hex digits here, not an exponent marker.
+    auto* ast = parse("SELECT 0xBEEF FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* lit = find(ast, NodeType::IntegerLiteral);
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->primary_text, "0xBEEF");
+    EXPECT_EQ(find(ast, NodeType::FloatLiteral), nullptr);
+}
+
+TEST_F(ExprHardeningTest, BinaryLiteralIsInteger) {
+    auto* ast = parse("SELECT 0b1010 FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* lit = find(ast, NodeType::IntegerLiteral);
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->primary_text, "0b1010");
+    EXPECT_EQ(find(ast, NodeType::FloatLiteral), nullptr);
+}
+
+TEST_F(ExprHardeningTest, LeadingDotFloatIsFloat) {
+    auto* ast = parse("SELECT .5 FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* lit = find(ast, NodeType::FloatLiteral);
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(lit->primary_text, ".5");
+}
+
+TEST_F(ExprHardeningTest, DecimalStaysFloatIntegerStaysInteger) {
+    // Regression guard for the ordinary decimal forms.
+    auto* d = parse("SELECT 3.14 FROM t");
+    ASSERT_NE(d, nullptr);
+    ASSERT_NE(find(d, NodeType::FloatLiteral), nullptr);
+    EXPECT_EQ(find(d, NodeType::IntegerLiteral), nullptr);
+
+    auto* i = parse("SELECT 42 FROM t");
+    ASSERT_NE(i, nullptr);
+    ASSERT_NE(find(i, NodeType::IntegerLiteral), nullptr);
+    EXPECT_EQ(find(i, NodeType::FloatLiteral), nullptr);
+}
