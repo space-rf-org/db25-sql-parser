@@ -522,11 +522,19 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
     
     // Parse left side (primary expression)
     ast::ASTNode* left = parse_primary_expression();
-    
+
     if (!left) {
         return nullptr;
     }
-    
+
+    // COLLATE is a postfix that binds tighter than any binary operator, so it
+    // attaches to the primary before the precedence loop: `a = b COLLATE "C"`
+    // parses as `a = (b COLLATE "C")`.
+    left = parse_collate_postfix(left);
+    if (!left) {
+        return nullptr;
+    }
+
     // Loop to handle operators with precedence
     while (true) {
         int precedence = get_precedence();
@@ -1050,6 +1058,39 @@ ast::ASTNode* Parser::parse_cast_expression() {
     }
     
     return cast_node;
+}
+
+// ========== COLLATE postfix ==========
+
+ast::ASTNode* Parser::parse_collate_postfix(ast::ASTNode* operand) {
+    // `<value> COLLATE <collation>` annotates a value with a collation. COLLATE
+    // binds tighter than any binary operator, so it is applied as a postfix to
+    // the primary immediately after it is parsed. The collation name is stored
+    // on the CollateClause's schema_name; the annotated value is its one child.
+    while (operand != nullptr && current_token_ &&
+           current_token_->type == tokenizer::TokenType::Keyword &&
+           current_token_->keyword_id == db25::Keyword::COLLATE) {
+        advance();  // consume COLLATE
+        auto* node = arena_.allocate<ast::ASTNode>();
+        new (node) ast::ASTNode(ast::NodeType::CollateClause);
+        node->node_id = next_node_id_++;
+        node->primary_text = copy_to_arena("COLLATE");
+
+        // The collation name is an identifier (bare or delimited) or a string.
+        if (current_token_ &&
+            (current_token_->type == tokenizer::TokenType::Identifier ||
+             current_token_->type == tokenizer::TokenType::Keyword ||
+             current_token_->type == tokenizer::TokenType::String)) {
+            node->schema_name = copy_to_arena(current_token_->value);
+            advance();
+        }
+
+        operand->parent = node;
+        node->first_child = operand;
+        node->child_count = 1;
+        operand = node;
+    }
+    return operand;
 }
 
 // ========== EXTRACT Expression Parser ==========

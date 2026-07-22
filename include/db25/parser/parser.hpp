@@ -279,6 +279,9 @@ protected:
     [[nodiscard]] ast::ASTNode* parse_table_reference();
     [[nodiscard]] ast::ASTNode* parse_case_expression();
     [[nodiscard]] ast::ASTNode* parse_cast_expression();
+    // Wrap `operand` in a CollateClause for each trailing COLLATE <name> postfix.
+    // Returns `operand` unchanged when no COLLATE follows.
+    [[nodiscard]] ast::ASTNode* parse_collate_postfix(ast::ASTNode* operand);
     [[nodiscard]] ast::ASTNode* parse_extract_expression();
     
     // ========== Pratt Parser for Expressions ==========
