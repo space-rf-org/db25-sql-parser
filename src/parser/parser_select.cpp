@@ -1411,42 +1411,74 @@ ast::ASTNode* Parser::parse_table_reference() {
 
     ast::ASTNode* ref_node = nullptr;
 
-    // Derived table: ( SELECT ... ) or ( WITH ... ) with a required alias.
-    // Only treat '(' as a table reference when it introduces a subquery; a
-    // plain grouped expression is not valid in a FROM/JOIN position here.
+    // A '(' in table-reference position introduces either a derived table
+    // ( SELECT ... ) / ( WITH ... ), or a parenthesized join group such as
+    // ( a JOIN b ON a.id = b.id ). Disambiguate on the following token.
     if (current_token_->type == tokenizer::TokenType::Delimiter &&
-        current_token_->value == "(" &&
-        peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword &&
-        (peek_token_->keyword_id == db25::Keyword::SELECT ||
-         peek_token_->keyword_id == db25::Keyword::WITH)) {
-        advance();               // consume '('
-        parenthesis_depth_++;
+        current_token_->value == "(") {
+        const bool is_derived_table =
+            peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword &&
+            (peek_token_->keyword_id == db25::Keyword::SELECT ||
+             peek_token_->keyword_id == db25::Keyword::WITH);
+        // A parenthesized join group begins with something that itself begins a
+        // table reference: an identifier (table name) or a nested '('.
+        const bool is_join_group =
+            !is_derived_table && peek_token_ &&
+            (peek_token_->type == tokenizer::TokenType::Identifier ||
+             (peek_token_->type == tokenizer::TokenType::Delimiter &&
+              peek_token_->value == "("));
 
-        auto* subquery_node = arena_.allocate<ast::ASTNode>();
-        new (subquery_node) ast::ASTNode(ast::NodeType::Subquery);
-        subquery_node->node_id = next_node_id_++;
-        subquery_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::IsSubquery);
+        if (is_derived_table) {
+            advance();               // consume '('
+            parenthesis_depth_++;
 
-        push_context(ParseContext::SUBQUERY);
-        auto* inner = (current_token_ &&
-                       current_token_->type == tokenizer::TokenType::Keyword &&
-                       current_token_->keyword_id == db25::Keyword::WITH)
-                          ? parse_with_statement()
-                          : parse_select_stmt();
-        pop_context();
-        if (inner) {
-            inner->parent = subquery_node;
-            subquery_node->first_child = inner;
-            subquery_node->child_count = 1;
+            auto* subquery_node = arena_.allocate<ast::ASTNode>();
+            new (subquery_node) ast::ASTNode(ast::NodeType::Subquery);
+            subquery_node->node_id = next_node_id_++;
+            subquery_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::IsSubquery);
+
+            push_context(ParseContext::SUBQUERY);
+            auto* inner = (current_token_ &&
+                           current_token_->type == tokenizer::TokenType::Keyword &&
+                           current_token_->keyword_id == db25::Keyword::WITH)
+                              ? parse_with_statement()
+                              : parse_select_stmt();
+            pop_context();
+            if (inner) {
+                inner->parent = subquery_node;
+                subquery_node->first_child = inner;
+                subquery_node->child_count = 1;
+            }
+
+            // Consume closing ')'
+            if (current_token_ && current_token_->value == ")") {
+                if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                advance();
+            }
+
+            ref_node = subquery_node;
+        } else if (is_join_group) {
+            // Parenthesized join group: ( <table-ref> [ <join> ]* ). Parse the
+            // inner join tree by reusing the FROM-item / join chaining logic
+            // (parse_from_clause -> parse_table_reference + parse_join_clause),
+            // then consume the matching ')'. The resulting FromClause node
+            // stands in as a single table reference so the caller can attach it
+            // and continue parsing any trailing joins on the group.
+            advance();               // consume '('
+            parenthesis_depth_++;
+
+            auto* group = parse_from_clause();
+
+            // Consume closing ')'
+            if (current_token_ && current_token_->value == ")") {
+                if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                advance();
+            }
+
+            ref_node = group;
         }
-
-        // Consume closing ')'
-        if (current_token_ && current_token_->value == ")") {
-            if (parenthesis_depth_ > 0) parenthesis_depth_--;
-            advance();
-        }
-
-        ref_node = subquery_node;
+        // Otherwise (a bare '(' that is neither): leave it unconsumed and fall
+        // through to return nullptr, preserving the prior behaviour.
     }
     // Simple table name, optionally schema/catalog qualified: "schema.table"
     // (or "catalog.schema.table"). Read every dotted part, not just the first,

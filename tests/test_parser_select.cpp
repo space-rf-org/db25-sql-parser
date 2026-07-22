@@ -561,3 +561,65 @@ TEST_F(SelectParserTest, DistinctWithStar) {
     auto* star = find_child_by_type(select_list, NodeType::Star);
     ASSERT_NE(star, nullptr);
 }
+// ===== Parenthesized JOIN group in FROM position =====
+// Regression: `FROM (a JOIN b ON ...) JOIN c ON ...` previously dropped the
+// whole FROM clause (parse_table_reference did not recognise a parenthesized
+// join group, so parse_from_clause returned nullptr with FROM consumed and the
+// remainder of the statement became trailing input).
+
+namespace {
+// Recursively count nodes of a given type anywhere in the subtree.
+int count_nodes_of_type(ASTNode* n, NodeType t) {
+    if (!n) return 0;
+    int c = (n->node_type == t) ? 1 : 0;
+    for (auto* ch = n->first_child; ch; ch = ch->next_sibling) {
+        c += count_nodes_of_type(ch, t);
+    }
+    return c;
+}
+}  // namespace
+
+TEST_F(SelectParserTest, ParenthesizedJoinGroupInFrom) {
+    auto result = parser.parse(
+        "SELECT * FROM (a JOIN b ON a.id=b.id) JOIN c ON a.id=c.id");
+    ASSERT_TRUE(result.has_value()) << "parenthesized join group should parse";
+
+    // No input may be dropped: the entire FROM clause must be consumed.
+    EXPECT_FALSE(parser.has_trailing_input());
+    EXPECT_EQ(parser.trailing_token_count(), 0u);
+
+    auto* ast = result.value();
+    auto* from = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from, nullptr) << "SELECT must have a FROM clause";
+
+    // The FROM clause holds the parenthesized group (itself a nested join tree)
+    // plus the trailing `JOIN c`. Overall there must be two JoinClause nodes:
+    // the inner `JOIN b` and the outer `JOIN c`.
+    EXPECT_EQ(count_nodes_of_type(from, NodeType::JoinClause), 2);
+
+    // Three base tables (a, b, c) are referenced.
+    EXPECT_EQ(count_nodes_of_type(from, NodeType::TableRef), 3);
+
+    // The nested group is represented as a FromClause nested inside the outer
+    // FROM clause, containing table `a` and the `JOIN b` clause.
+    auto* nested = find_child_by_type(from, NodeType::FromClause);
+    ASSERT_NE(nested, nullptr) << "nested join group should be present";
+    EXPECT_EQ(count_nodes_of_type(nested, NodeType::JoinClause), 1);
+    EXPECT_NE(find_child_by_type(nested, NodeType::TableRef), nullptr);
+}
+
+TEST_F(SelectParserTest, DerivedTableStillParsesAsSubquery) {
+    // Control: a `( SELECT ... ) alias` must remain a derived table (Subquery),
+    // not be mistaken for a parenthesized join group.
+    auto result = parser.parse("SELECT * FROM (SELECT 1) x");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(parser.has_trailing_input());
+
+    auto* ast = result.value();
+    auto* from = find_child_by_type(ast, NodeType::FromClause);
+    ASSERT_NE(from, nullptr);
+
+    auto* subquery = find_child_by_type(from, NodeType::Subquery);
+    ASSERT_NE(subquery, nullptr) << "derived table must parse as a Subquery";
+    EXPECT_EQ(subquery->schema_name, "x");  // alias preserved
+}
