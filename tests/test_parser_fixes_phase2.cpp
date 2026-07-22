@@ -342,3 +342,84 @@ TEST_F(ParserFixesPhase2Test, MixedFrameTypes) {
         EXPECT_GE(rows_frames + range_frames, 1) << "Should find at least one frame specification";
     }
 }
+// Helper: count FrameBound descendants of a node.
+static int count_frame_bounds(ASTNode* n) {
+    if (!n) return 0;
+    int c = (n->node_type == NodeType::FrameBound) ? 1 : 0;
+    for (auto* ch = n->first_child; ch; ch = ch->next_sibling) {
+        c += count_frame_bounds(ch);
+    }
+    return c;
+}
+
+// Regression: a single-bound window frame (no BETWEEN) previously failed to
+// parse with "Unclosed parenthesis" because frame-bound parsing was nested
+// entirely under the BETWEEN branch, so the bound tokens and the closing ')'
+// were never consumed. Unlike MixedFrameTypes above, these assertions are
+// UNCONDITIONAL: the parse MUST succeed.
+TEST_F(ParserFixesPhase2Test, SingleBoundFrameUnboundedPreceding) {
+    std::string sql = "SELECT SUM(x) OVER (ORDER BY a ROWS UNBOUNDED PRECEDING) FROM t";
+
+    auto result = parser.parse(sql);
+    ASSERT_TRUE(result.has_value())
+        << "single-bound ROWS UNBOUNDED PRECEDING frame must parse";
+    EXPECT_FALSE(parser.has_trailing_input());
+
+    auto* frame = find_node_type(result.value(), NodeType::FrameClause);
+    ASSERT_NE(frame, nullptr) << "should produce a FrameClause";
+    EXPECT_EQ(frame->primary_text, "ROWS");
+    EXPECT_EQ(count_frame_bounds(frame), 1) << "single-bound frame has one bound";
+
+    auto* bound = find_node_type(frame, NodeType::FrameBound);
+    ASSERT_NE(bound, nullptr);
+    EXPECT_EQ(bound->primary_text, "UNBOUNDED PRECEDING");
+}
+
+TEST_F(ParserFixesPhase2Test, SingleBoundFrameNPreceding) {
+    std::string sql = "SELECT SUM(x) OVER (ORDER BY a ROWS 5 PRECEDING) FROM t";
+
+    auto result = parser.parse(sql);
+    ASSERT_TRUE(result.has_value()) << "single-bound ROWS 5 PRECEDING must parse";
+    EXPECT_FALSE(parser.has_trailing_input());
+
+    auto* frame = find_node_type(result.value(), NodeType::FrameClause);
+    ASSERT_NE(frame, nullptr);
+    EXPECT_EQ(frame->primary_text, "ROWS");
+    EXPECT_EQ(count_frame_bounds(frame), 1);
+
+    auto* bound = find_node_type(frame, NodeType::FrameBound);
+    ASSERT_NE(bound, nullptr);
+    EXPECT_EQ(bound->primary_text, "5 PRECEDING");
+}
+
+TEST_F(ParserFixesPhase2Test, SingleBoundFrameRangeCurrentRow) {
+    std::string sql = "SELECT SUM(x) OVER (ORDER BY a RANGE CURRENT ROW) FROM t";
+
+    auto result = parser.parse(sql);
+    ASSERT_TRUE(result.has_value()) << "single-bound RANGE CURRENT ROW must parse";
+    EXPECT_FALSE(parser.has_trailing_input());
+
+    auto* frame = find_node_type(result.value(), NodeType::FrameClause);
+    ASSERT_NE(frame, nullptr);
+    EXPECT_EQ(frame->primary_text, "RANGE");
+    EXPECT_EQ(count_frame_bounds(frame), 1);
+
+    auto* bound = find_node_type(frame, NodeType::FrameBound);
+    ASSERT_NE(bound, nullptr);
+    EXPECT_EQ(bound->primary_text, "CURRENT ROW");
+}
+
+// Control: the two-bound BETWEEN form must keep working (two FrameBounds).
+TEST_F(ParserFixesPhase2Test, TwoBoundBetweenFrameStillParses) {
+    std::string sql =
+        "SELECT SUM(x) OVER (ORDER BY a ROWS BETWEEN UNBOUNDED PRECEDING "
+        "AND CURRENT ROW) FROM t";
+
+    auto result = parser.parse(sql);
+    ASSERT_TRUE(result.has_value()) << "two-bound BETWEEN frame must parse";
+    EXPECT_FALSE(parser.has_trailing_input());
+
+    auto* frame = find_node_type(result.value(), NodeType::FrameClause);
+    ASSERT_NE(frame, nullptr);
+    EXPECT_EQ(count_frame_bounds(frame), 2) << "BETWEEN frame has two bounds";
+}
