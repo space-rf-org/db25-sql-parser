@@ -364,11 +364,17 @@ TEST_F(ArenaEdgeTest, OverAligned) {
     ASSERT_NE(ptr2, nullptr);
     EXPECT_EQ(reinterpret_cast<uintptr_t>(ptr2) % 256, 0);
     
-    // The second allocation should have consumed at least 256 bytes
-    // due to alignment padding
+    // The second allocation is 256-aligned (checked above). The arena advances by
+    // the alignment padding plus the size; a correct allocator pads by strictly less
+    // than one alignment (padding == distance to the next aligned address), so the
+    // consumed span lies in [size, size + alignment - 1]. (The previous bound of
+    // ">= 256" only held when the block base happened to be 256-aligned, an artifact
+    // of offset-based padding rather than a real invariant.)
     size_t used_for_second = arena->total_used() - used_after_first;
-    EXPECT_GE(used_for_second, 256) 
-        << "Alignment should consume at least alignment size when padding is needed";
+    EXPECT_GE(used_for_second, 1u)
+        << "The 1-byte over-aligned allocation must be accounted";
+    EXPECT_LE(used_for_second, 256u)
+        << "Alignment padding must be less than one alignment (no full-alignment waste)";
 }
 
 int main(int argc, char** argv) {

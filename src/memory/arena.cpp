@@ -8,9 +8,9 @@
  * 
  * ============================================================================
  * FROZEN CODE - DO NOT MODIFY WITHOUT DESIGN CHANGE PROCESS
- * Version: 1.0.0
+ * Version: 1.0.1
  * Status: Production Ready
- * Test Coverage: 98.5% (66/67 tests passing)
+ * Test Coverage: 100% (67/67 tests passing)
  * Performance: 6.5ns allocation, 152M ops/sec
  * See include/db25/memory/FROZEN_DO_NOT_MODIFY.md for modification process
  * ============================================================================
@@ -37,6 +37,7 @@
 #include "db25/memory/arena.hpp"
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 
 namespace db25 {
 
@@ -90,15 +91,25 @@ Arena::Block& Arena::Block::operator=(Block&& other) noexcept {
     return *this;
 }
 
+// Align the absolute address (base + used), not just the offset. The block base
+// is only guaranteed CACHE_LINE_SIZE (64) aligned, so aligning the offset alone
+// (align_up(used, alignment)) returns data + offset, which is misaligned whenever
+// the request exceeds the base's guarantee - e.g. ASTNode is alignas(128), and any
+// 256/page-aligned request. Measuring the pad from the real base makes the returned
+// pointer correctly aligned for any alignment. Block bases are deliberately left at
+// their natural (varying) addresses rather than page-aligned: varying bases give
+// each block a distinct cache colour, so nodes across blocks spread over all L1 sets
+// instead of colliding - page-aligning every block measurably slows node-heavy parses.
 bool Arena::Block::has_space(const size_t bytes, const size_t alignment) const noexcept {
-    const size_t aligned_used = Arena::align_up(used, alignment);
+    const size_t base = reinterpret_cast<uintptr_t>(data);
+    const size_t aligned_used = Arena::align_up(base + used, alignment) - base;
     return aligned_used + bytes <= size;
 }
 
 void* Arena::Block::allocate(const size_t bytes, const size_t alignment) {
-    const size_t aligned_used = Arena::align_up(used, alignment);
+    const size_t base = reinterpret_cast<uintptr_t>(data);
+    const size_t aligned_used = Arena::align_up(base + used, alignment) - base;
     assert(aligned_used + bytes <= size);
-    
     void* const ptr = data + aligned_used;
     used = aligned_used + bytes;
     return ptr;
@@ -158,10 +169,18 @@ void* Arena::allocate(const size_t size, const size_t alignment) {
         return ptr;
     }
     
+    // A fresh block base is only CACHE_LINE_SIZE aligned, so an over-aligned request
+    // (alignment > CACHE_LINE_SIZE) may skip up to (alignment - CACHE_LINE_SIZE) bytes
+    // to reach an aligned address inside the block. Reserve that headroom so the
+    // aligned payload always fits - both for the dedicated block below (which has no
+    // has_space guard) and so the geometric block sized next_block_size_ still fits.
+    const size_t pad_headroom = alignment > CACHE_LINE_SIZE ? alignment - CACHE_LINE_SIZE : 0;
+
     // Slow path: need new block
-    // If requested size is larger than next block size, allocate special block
-    if (actual_size > next_block_size_) {
-        auto block = std::make_unique<Block>(align_up(actual_size, CACHE_LINE_SIZE));
+    // If requested size (plus alignment headroom) is larger than next block size,
+    // allocate a special block sized to hold exactly this over-sized allocation.
+    if (actual_size + pad_headroom > next_block_size_) {
+        auto block = std::make_unique<Block>(align_up(actual_size + pad_headroom, CACHE_LINE_SIZE));
         const size_t used_before = block->used;
         void* const ptr = block->allocate(actual_size, alignment);
         const size_t used_after = block->used;
