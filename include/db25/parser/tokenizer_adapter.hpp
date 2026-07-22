@@ -119,11 +119,16 @@ namespace db25::parser::tokenizer {
         }
         
     private:
-        std::string sql_copy_;           // Own the SQL text
-        std::vector<Token> tokens_;      // All tokens
-        std::vector<std::string> token_strings_;  // Storage for token values
+        // Own the SQL text on the heap so its buffer address is stable across a
+        // move of this adapter: every Token::value below is a string_view into this
+        // buffer (not an owned copy), so the buffer must not relocate while tokens
+        // are alive. A plain std::string member would relocate its inline (SSO)
+        // storage on move and dangle those views; the unique_ptr keeps the string
+        // object - and therefore its buffer - fixed.
+        std::unique_ptr<std::string> sql_copy_;  // Own the SQL text (stable address)
+        std::vector<Token> tokens_;      // All tokens (values view into *sql_copy_)
         size_t position_ = 0;            // Current position
-        
+
         void tokenize();
     };
 } // namespace db25::parser::tokenizer
