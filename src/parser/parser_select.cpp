@@ -1838,20 +1838,94 @@ ast::ASTNode* Parser::parse_window_spec() {
         }
     }
     
-    // Parse frame clause (ROWS/RANGE BETWEEN ... AND ...)
+    // Parse frame clause: ROWS/RANGE/GROUPS { BETWEEN <bound> AND <bound> |
+    // <bound> }. A frame unit may be followed by BETWEEN (two bounds) or by a
+    // single bound (shorthand for BETWEEN <bound> AND CURRENT ROW).
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::ROWS ||
-         current_token_->keyword_id == db25::Keyword::RANGE)) {
-        
+         current_token_->keyword_id == db25::Keyword::RANGE ||
+         current_token_->keyword_id == db25::Keyword::GROUPS)) {
+
         auto* frame_node = arena_.allocate<ast::ASTNode>();
         new (frame_node) ast::ASTNode(ast::NodeType::FrameClause);
         frame_node->node_id = next_node_id_++;
         frame_node->parent = window_spec;
-        
+
         // Store frame type (ROWS or RANGE)
         frame_node->primary_text = copy_to_arena(current_token_->value);
         advance(); // consume ROWS/RANGE
-        
+
+        // Parse a single frame bound (UNBOUNDED PRECEDING/FOLLOWING, CURRENT
+        // ROW, <n> PRECEDING/FOLLOWING, or an INTERVAL bound). Shared by the
+        // single-bound frame form below; the BETWEEN form keeps its own inline
+        // parsing unchanged.
+        auto parse_frame_bound = [&]() -> ast::ASTNode* {
+            auto* bound = arena_.allocate<ast::ASTNode>();
+            new (bound) ast::ASTNode(ast::NodeType::FrameBound);
+            bound->node_id = next_node_id_++;
+            bound->parent = frame_node;
+
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                current_token_->keyword_id == db25::Keyword::UNBOUNDED) {
+                bound->primary_text = copy_to_arena("UNBOUNDED");
+                advance(); // consume UNBOUNDED
+                if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                    current_token_->keyword_id == db25::Keyword::PRECEDING) {
+                    bound->primary_text = copy_to_arena("UNBOUNDED PRECEDING");
+                    bound->semantic_flags |= ast::FrameBoundPreceding;
+                    advance(); // consume PRECEDING
+                } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                           current_token_->keyword_id == db25::Keyword::FOLLOWING) {
+                    bound->primary_text = copy_to_arena("UNBOUNDED FOLLOWING");
+                    bound->semantic_flags |= ast::FrameBoundFollowing;
+                    advance(); // consume FOLLOWING
+                }
+            } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                       current_token_->keyword_id == db25::Keyword::CURRENT) {
+                advance(); // consume CURRENT
+                if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                    current_token_->keyword_id == db25::Keyword::ROW) {
+                    bound->primary_text = copy_to_arena("CURRENT ROW");
+                    advance(); // consume ROW
+                }
+            } else if (current_token_) {
+                if (current_token_->type == tokenizer::TokenType::Number) {
+                    bound->primary_text = copy_to_arena(current_token_->value);
+                    advance(); // consume number
+                } else if (current_token_->value == "INTERVAL" || current_token_->value == "interval") {
+                    advance(); // consume INTERVAL
+                    if (current_token_ && current_token_->type == tokenizer::TokenType::String) {
+                        std::string interval_expr = "INTERVAL ";
+                        interval_expr += std::string(current_token_->value);
+                        bound->primary_text = copy_to_arena(interval_expr);
+                        advance();
+                    }
+                    if (current_token_ && (current_token_->type == tokenizer::TokenType::Keyword ||
+                                           current_token_->type == tokenizer::TokenType::Identifier)) {
+                        std::string interval_text = bound->primary_text.empty() ? "INTERVAL" : std::string(bound->primary_text);
+                        interval_text += " ";
+                        interval_text += std::string(current_token_->value);
+                        bound->primary_text = copy_to_arena(interval_text);
+                        advance();
+                    }
+                }
+                if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
+                    if (current_token_->keyword_id == db25::Keyword::PRECEDING) {
+                        bound->primary_text =
+                            copy_to_arena(std::string(bound->primary_text) + " PRECEDING");
+                        bound->semantic_flags |= ast::FrameBoundPreceding;
+                        advance();
+                    } else if (current_token_->keyword_id == db25::Keyword::FOLLOWING) {
+                        bound->primary_text =
+                            copy_to_arena(std::string(bound->primary_text) + " FOLLOWING");
+                        bound->semantic_flags |= ast::FrameBoundFollowing;
+                        advance();
+                    }
+                }
+            }
+            return bound;
+        };
+
         // Parse BETWEEN clause
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
             current_token_->keyword_id == db25::Keyword::BETWEEN) {
@@ -2010,8 +2084,18 @@ ast::ASTNode* Parser::parse_window_spec() {
                 frame_start->next_sibling = frame_end;
                 frame_node->child_count++;
             }
+        } else {
+            // Single-bound frame: ROWS/RANGE/GROUPS <bound> without BETWEEN,
+            // e.g. ROWS UNBOUNDED PRECEDING, ROWS 5 PRECEDING, RANGE CURRENT
+            // ROW. Parse exactly one bound so the frame-bound tokens are
+            // consumed and the closing ')' is reached (otherwise parenthesis
+            // tracking is left elevated and the parse fails as "Unclosed
+            // parenthesis").
+            auto* frame_bound = parse_frame_bound();
+            frame_node->first_child = frame_bound;
+            frame_node->child_count = 1;
         }
-        
+
         // Add frame node to window spec
         if (!window_spec->first_child) {
             window_spec->first_child = frame_node;
