@@ -802,24 +802,67 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                     advance(); // consume NOT
                 }
                 
+                // IS [NOT] TRUE / FALSE / UNKNOWN -- a three-valued boolean test
+                // that collapses the operand's 3VL truth value to a plain 2VL
+                // boolean (never NULL). TRUE/FALSE tokenize as keywords; UNKNOWN
+                // is not a reserved keyword, so it arrives as a bare identifier
+                // (matched case-insensitively without a heap allocation).
+                auto is_unknown_ident = [](std::string_view v) {
+                    static constexpr char kU[] = "UNKNOWN";
+                    if (v.size() != 7) return false;
+                    for (std::size_t i = 0; i < 7; ++i) {
+                        char c = v[i];
+                        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+                        if (c != kU[i]) return false;
+                    }
+                    return true;
+                };
+                if (current_token_ &&
+                    (current_token_->keyword_id == db25::Keyword::KW_TRUE ||
+                     current_token_->keyword_id == db25::Keyword::KW_FALSE ||
+                     is_unknown_ident(current_token_->value))) {
+                    const char* target =
+                        current_token_->keyword_id == db25::Keyword::KW_TRUE  ? "TRUE"
+                        : current_token_->keyword_id == db25::Keyword::KW_FALSE ? "FALSE"
+                        : "UNKNOWN";
+                    advance(); // consume TRUE / FALSE / UNKNOWN
+
+                    auto* bool_test_node = arena_.allocate<ast::ASTNode>();
+                    new (bool_test_node) ast::ASTNode(ast::NodeType::BooleanTestExpr);
+                    bool_test_node->node_id = next_node_id_++;
+
+                    // Store the full test, e.g. "IS TRUE" / "IS NOT UNKNOWN". The
+                    // binder reads the target off this text and the NOT off the
+                    // presence of "NOT" (matching the IsNull convention).
+                    bool_test_node->primary_text =
+                        copy_to_arena(std::string("IS ") + (is_not ? "NOT " : "") + target);
+
+                    left->parent = bool_test_node;
+                    bool_test_node->first_child = left;
+                    bool_test_node->child_count = 1;
+
+                    left = bool_test_node;
+                    continue;
+                }
+
                 // Expect NULL
                 if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
                     (current_token_->value != "NULL" && current_token_->value != "null")) {
-                    return left; // Error: expected NULL
+                    return left; // Error: expected NULL / TRUE / FALSE / UNKNOWN
                 }
                 advance(); // consume NULL
-                
+
                 auto* is_null_node = arena_.allocate<ast::ASTNode>();
                 new (is_null_node) ast::ASTNode(ast::NodeType::IsNullExpr);
                 is_null_node->node_id = next_node_id_++;
-                
+
                 // Store IS NULL or IS NOT NULL
                 is_null_node->primary_text = copy_to_arena(is_not ? "IS NOT NULL" : "IS NULL");
-                
+
                 left->parent = is_null_node;
                 is_null_node->first_child = left;
                 is_null_node->child_count = 1;
-                
+
                 left = is_null_node;
                 continue;
             }
