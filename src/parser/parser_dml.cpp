@@ -375,8 +375,12 @@ ast::ASTNode* Parser::parse_update_stmt() {
     last_child = set_clause;
     update_node->child_count++;
     
-    // Optional FROM clause (PostgreSQL extension)
+    // Optional FROM clause (PostgreSQL extension). parse_from_clause() begins at
+    // the first table reference (as in SELECT), so the FROM keyword must be
+    // consumed first - without this the clause failed to parse and was dropped,
+    // leaving `... FROM extra WHERE ...` columns unresolved.
     if (current_token_ && current_token_->keyword_id == db25::Keyword::FROM) {
+        advance();  // consume FROM
         auto* from_clause = parse_from_clause();
         if (from_clause) {
             from_clause->parent = update_node;
