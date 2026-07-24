@@ -481,12 +481,14 @@ int Parser::get_precedence() const {
         if (current_token_->keyword_id == db25::Keyword::BETWEEN) return 3;  // PREC_BETWEEN
         if (current_token_->keyword_id == db25::Keyword::IN) return 3;  // PREC_IN
         if (current_token_->keyword_id == db25::Keyword::LIKE) return 3;  // PREC_LIKE
+        if (current_token_->keyword_id == db25::Keyword::ILIKE) return 3;  // PREC_LIKE (case-insensitive)
         if (current_token_->keyword_id == db25::Keyword::IS) return 3;  // PREC_IS (for IS NULL)
-        // NOT can be binary when followed by LIKE/IN/BETWEEN
+        // NOT can be binary when followed by LIKE/ILIKE/IN/BETWEEN
         if (current_token_->keyword_id == db25::Keyword::NOT) {
-            // Look ahead to see if it's NOT LIKE/IN/BETWEEN
+            // Look ahead to see if it's NOT LIKE/ILIKE/IN/BETWEEN
             if (peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword) {
                 if (peek_token_->keyword_id == db25::Keyword::LIKE ||
+                    peek_token_->keyword_id == db25::Keyword::ILIKE ||
                     peek_token_->keyword_id == db25::Keyword::IN ||
                     peek_token_->keyword_id == db25::Keyword::BETWEEN) {
                     return 3;  // Same precedence as LIKE/IN/BETWEEN
@@ -580,6 +582,7 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                 
                 auto next_keyword_id = current_token_->keyword_id;
                 if (next_keyword_id != db25::Keyword::LIKE &&
+                    next_keyword_id != db25::Keyword::ILIKE &&
                     next_keyword_id != db25::Keyword::IN &&
                     next_keyword_id != db25::Keyword::BETWEEN) {
                     // NOT followed by unsupported keyword - error
@@ -747,21 +750,24 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                 continue;
             }
             
-            // LIKE pattern or NOT LIKE pattern
-            if (op_keyword_id == db25::Keyword::LIKE) {
+            // LIKE / ILIKE pattern or NOT LIKE / NOT ILIKE pattern
+            if (op_keyword_id == db25::Keyword::LIKE ||
+                op_keyword_id == db25::Keyword::ILIKE) {
                 auto* pattern = parse_expression(precedence + 1);
                 if (!pattern) return left;
-                
+
                 auto* like_node = arena_.allocate<ast::ASTNode>();
                 new (like_node) ast::ASTNode(ast::NodeType::LikeExpr);
                 like_node->node_id = next_node_id_++;
-                
-                // Store "LIKE" or "NOT LIKE"
+
+                const bool is_ilike = (op_keyword_id == db25::Keyword::ILIKE);
+                // Store the canonical operator text; the binder reads ILIKE (for
+                // the case-insensitive flag) and NOT off this text.
                 if (has_not) {
-                    like_node->primary_text = copy_to_arena("NOT LIKE");
+                    like_node->primary_text = copy_to_arena(is_ilike ? "NOT ILIKE" : "NOT LIKE");
                     like_node->semantic_flags |= (1 << 6); // Use bit 6 for NOT flag
                 } else {
-                    like_node->primary_text = op_str_view;
+                    like_node->primary_text = copy_to_arena(is_ilike ? "ILIKE" : "LIKE");
                 }
                 
                 left->parent = like_node;

@@ -350,3 +350,38 @@ TEST_F(ExprHardeningTest, IsNullStillParsesAfterBooleanTest) {
     EXPECT_EQ(pred->node_type, NodeType::IsNullExpr);
     EXPECT_EQ(pred->primary_text, "IS NOT NULL");
 }
+
+// ---- ILIKE (case-insensitive LIKE) ----------------------------------------
+
+TEST_F(ExprHardeningTest, IlikeBuildsLikeExpr) {
+    // `name ILIKE 'a%'` is a LikeExpr tagged ILIKE, over the column and pattern.
+    auto* ast = parse("SELECT * FROM t WHERE name ILIKE 'a%'");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::LikeExpr);
+    EXPECT_EQ(pred->primary_text, "ILIKE");
+    auto* lhs = pred->first_child;
+    ASSERT_NE(lhs, nullptr);
+    EXPECT_EQ(lhs->node_type, NodeType::ColumnRef);
+    EXPECT_EQ(lhs->primary_text, "name");
+}
+
+TEST_F(ExprHardeningTest, NotIlikeBuildsNegatedLikeExpr) {
+    auto* ast = parse("SELECT * FROM t WHERE name NOT ILIKE 'a%'");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::LikeExpr);
+    EXPECT_EQ(pred->primary_text, "NOT ILIKE");
+}
+
+TEST_F(ExprHardeningTest, PlainLikeStillParses) {
+    // Regression guard: LIKE must still produce a LikeExpr tagged LIKE.
+    auto* ast = parse("SELECT * FROM t WHERE name LIKE 'a%'");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::LikeExpr);
+    EXPECT_EQ(pred->primary_text, "LIKE");
+}
