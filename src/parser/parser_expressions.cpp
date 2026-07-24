@@ -765,7 +765,22 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                 pattern->parent = like_node;
                 left->next_sibling = pattern;
                 like_node->child_count = 2;
-                
+
+                // Optional ESCAPE '<char>' clause. Attach the escape-character
+                // expression as a third child; the binder lowers it into the Like
+                // node's escape slot and the evaluator treats the following
+                // pattern character literally.
+                if (current_token_ &&
+                    current_token_->type == tokenizer::TokenType::Keyword &&
+                    current_token_->keyword_id == db25::Keyword::ESCAPE) {
+                    advance();  // consume ESCAPE
+                    if (auto* escape = parse_expression(precedence + 1)) {
+                        escape->parent = like_node;
+                        pattern->next_sibling = escape;
+                        like_node->child_count = 3;
+                    }
+                }
+
                 left = like_node;
                 continue;
             }
