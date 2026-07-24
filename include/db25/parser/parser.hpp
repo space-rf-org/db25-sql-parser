@@ -282,6 +282,8 @@ protected:
     // Wrap `operand` in a CollateClause for each trailing COLLATE <name> postfix.
     // Returns `operand` unchanged when no COLLATE follows.
     [[nodiscard]] ast::ASTNode* parse_collate_postfix(ast::ASTNode* operand);
+    // `<value>::<type>` shorthand for CAST(<value> AS <type>); postfix, tightest.
+    [[nodiscard]] ast::ASTNode* parse_cast_postfix(ast::ASTNode* operand);
     [[nodiscard]] ast::ASTNode* parse_extract_expression();
     
     // ========== Pratt Parser for Expressions ==========
