@@ -262,7 +262,13 @@ enum class SetOp : uint8_t {
     Union,
     UnionAll,
     Intersect,
-    Except
+    Except,
+    // ALL (multiset) variants. Appended so the existing enumerators keep their
+    // values. INTERSECT ALL / EXCEPT ALL preserve duplicate rows (multiset
+    // intersection / difference); the un-suffixed forms de-duplicate. The parser
+    // already records the ALL keyword (NodeFlags::All) on these nodes.
+    IntersectAll,
+    ExceptAll
 };
 
 /**
