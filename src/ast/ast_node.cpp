@@ -141,6 +141,7 @@ void ASTNode::remove_child(ASTNode* const child) noexcept {
         case NodeType::BetweenExpr: return "BetweenExpr";
         case NodeType::LikeExpr: return "LikeExpr";
         case NodeType::IsNullExpr: return "IsNullExpr";
+        case NodeType::BooleanTestExpr: return "BooleanTestExpr";
         case NodeType::WindowExpr: return "WindowExpr";
         // Clauses
         case NodeType::SelectList: return "SelectList";

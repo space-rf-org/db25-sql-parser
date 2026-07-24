@@ -73,6 +73,7 @@ enum class NodeType : uint8_t {
     BetweenExpr,
     LikeExpr,        // LIKE pattern matching
     IsNullExpr,      // IS NULL / IS NOT NULL
+    BooleanTestExpr, // IS [NOT] TRUE / FALSE / UNKNOWN
     WindowExpr,
     
     // === Clause Nodes ===

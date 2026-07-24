@@ -303,3 +303,50 @@ TEST_F(ExprHardeningTest, CollateBindsTighterThanComparison) {
     ASSERT_NE(lhs, nullptr);
     EXPECT_EQ(lhs->node_type, NodeType::CollateClause);
 }
+
+// ---- IS [NOT] TRUE / FALSE / UNKNOWN --------------------------------------
+
+TEST_F(ExprHardeningTest, IsTrueBuildsBooleanTest) {
+    // `flag IS TRUE` is a BooleanTestExpr over the column, not an IsNullExpr and
+    // not a dropped predicate.
+    auto* ast = parse("SELECT * FROM t WHERE flag IS TRUE");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BooleanTestExpr);
+    EXPECT_EQ(pred->primary_text, "IS TRUE");
+    auto* operand = pred->first_child;
+    ASSERT_NE(operand, nullptr);
+    EXPECT_EQ(operand->node_type, NodeType::ColumnRef);
+    EXPECT_EQ(operand->primary_text, "flag");
+}
+
+TEST_F(ExprHardeningTest, IsNotFalseBuildsNegatedBooleanTest) {
+    auto* ast = parse("SELECT * FROM t WHERE flag IS NOT FALSE");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BooleanTestExpr);
+    EXPECT_EQ(pred->primary_text, "IS NOT FALSE");
+}
+
+TEST_F(ExprHardeningTest, IsUnknownBuildsBooleanTest) {
+    // UNKNOWN is not a reserved keyword; it arrives as an identifier and must
+    // still be recognized (case-insensitively) as the boolean-test target.
+    auto* ast = parse("SELECT * FROM t WHERE (a > b) is unknown");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BooleanTestExpr);
+    EXPECT_EQ(pred->primary_text, "IS UNKNOWN");
+}
+
+TEST_F(ExprHardeningTest, IsNullStillParsesAfterBooleanTest) {
+    // Regression guard: the IS handler must still route NULL to IsNullExpr.
+    auto* ast = parse("SELECT * FROM t WHERE x IS NOT NULL");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::IsNullExpr);
+    EXPECT_EQ(pred->primary_text, "IS NOT NULL");
+}
