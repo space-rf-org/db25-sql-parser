@@ -1737,7 +1737,49 @@ ast::ASTNode* Parser::parse_function_call() {
         }
     }
     pop_context();
-    
+
+    // Optional aggregate FILTER (WHERE predicate) clause, e.g.
+    //   COUNT(*) FILTER (WHERE amount > 0)
+    // Sits between the argument list and any OVER clause. The predicate is
+    // wrapped in a WhereClause node attached as a child of the call, so the
+    // binder can tell it apart from the aggregate's arguments.
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        current_token_->keyword_id == db25::Keyword::FILTER) {
+        advance();  // consume FILTER
+        if (current_token_ && current_token_->value == "(") {
+            parenthesis_depth_++;
+            advance();  // consume '('
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                current_token_->keyword_id == db25::Keyword::WHERE) {
+                advance();  // consume WHERE
+                ast::ASTNode* pred = parse_expression(0);
+                if (pred) {
+                    auto* where_node = arena_.allocate<ast::ASTNode>();
+                    new (where_node) ast::ASTNode(ast::NodeType::WhereClause);
+                    where_node->node_id = next_node_id_++;
+                    where_node->primary_text = copy_to_arena("FILTER");
+                    pred->parent = where_node;
+                    where_node->first_child = pred;
+                    where_node->child_count = 1;
+                    // Attach the FILTER clause as the call's last child.
+                    where_node->parent = func_call;
+                    if (func_call->first_child) {
+                        ast::ASTNode* last = func_call->first_child;
+                        while (last->next_sibling) last = last->next_sibling;
+                        last->next_sibling = where_node;
+                    } else {
+                        func_call->first_child = where_node;
+                    }
+                    func_call->child_count++;
+                }
+            }
+            if (current_token_ && current_token_->value == ")") {
+                if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                advance();  // consume ')'
+            }
+        }
+    }
+
     // Check for OVER clause (window function)
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::OVER)) {
