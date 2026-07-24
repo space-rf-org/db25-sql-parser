@@ -232,11 +232,13 @@ ast::ASTNode* Parser::parse_primary_expression() {
             auto* first = parse_expression(0);
 
             // Row constructor: a comma after the first expression means this is
-            // a parenthesised expression list, not a simple grouping.
+            // a parenthesised expression list "(a, b, ...)", not a simple
+            // grouping. Same RowConstructor node as the explicit ROW(...) form.
             if (current_token_ && current_token_->value == ",") {
                 auto* row_node = arena_.allocate<ast::ASTNode>();
-                new (row_node) ast::ASTNode(ast::NodeType::RowExpr);
+                new (row_node) ast::ASTNode(ast::NodeType::RowConstructor);
                 row_node->node_id = next_node_id_++;
+                row_node->primary_text = copy_to_arena("ROW");
                 if (first) {
                     first->parent = row_node;
                     row_node->first_child = first;
@@ -355,6 +357,38 @@ ast::ASTNode* Parser::parse_primary_expression() {
                 advance(); // consume ']'
             }
             return array_node;
+        }
+
+        // ROW(a, b, ...) explicit row constructor. Handled before the function-
+        // call path so ROW is not parsed as a function named "ROW". Unlike the
+        // bare (a, b) form below, ROW(x) with a single element is still a row.
+        if (current_token_->type == tokenizer::TokenType::Keyword &&
+            current_token_->keyword_id == db25::Keyword::ROW &&
+            peek_token_ && peek_token_->value == "(") {
+            advance();  // consume ROW
+            parenthesis_depth_++;
+            advance();  // consume '('
+            auto* row_node = arena_.allocate<ast::ASTNode>();
+            new (row_node) ast::ASTNode(ast::NodeType::RowConstructor);
+            row_node->node_id = next_node_id_++;
+            row_node->primary_text = copy_to_arena("ROW");
+            ast::ASTNode* last = nullptr;
+            while (current_token_ && current_token_->value != ")") {
+                auto* el = parse_expression(0);
+                if (!el) break;
+                el->parent = row_node;
+                if (!row_node->first_child) row_node->first_child = el;
+                else last->next_sibling = el;
+                last = el;
+                row_node->child_count++;
+                if (current_token_ && current_token_->value == ",") advance();
+                else break;
+            }
+            if (current_token_ && current_token_->value == ")") {
+                if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                advance();  // consume ')'
+            }
+            return row_node;
         }
 
         // Look ahead using peek_token_

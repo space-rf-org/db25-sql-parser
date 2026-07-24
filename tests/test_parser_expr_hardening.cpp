@@ -418,3 +418,51 @@ TEST_F(ExprHardeningTest, AggregateWithoutFilterHasNoWhereClause) {
     for (auto* c = call->first_child; c; c = c->next_sibling)
         EXPECT_NE(c->node_type, NodeType::WhereClause);
 }
+
+// ---- Row constructors ------------------------------------------------------
+
+TEST_F(ExprHardeningTest, BareTupleBuildsRowConstructor) {
+    // (a, b) with a top-level comma is a RowConstructor with two children.
+    auto* ast = parse("SELECT * FROM t WHERE (a, b) = (1, 2)");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "=");
+    auto* lhs = pred->first_child;
+    ASSERT_NE(lhs, nullptr);
+    EXPECT_EQ(lhs->node_type, NodeType::RowConstructor);
+    EXPECT_EQ(lhs->child_count, 2);
+    auto* rhs = lhs->next_sibling;
+    ASSERT_NE(rhs, nullptr);
+    EXPECT_EQ(rhs->node_type, NodeType::RowConstructor);
+    EXPECT_EQ(rhs->child_count, 2);
+}
+
+TEST_F(ExprHardeningTest, ExplicitRowKeywordBuildsRowConstructor) {
+    // ROW(a, b, c) is a RowConstructor, not a function call named ROW.
+    auto* ast = parse("SELECT * FROM t WHERE ROW(a, b, c) = ROW(1, 2, 3)");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    auto* lhs = pred->first_child;
+    ASSERT_NE(lhs, nullptr);
+    EXPECT_EQ(lhs->node_type, NodeType::RowConstructor);
+    EXPECT_EQ(lhs->child_count, 3);
+    EXPECT_EQ(find(ast, NodeType::FunctionCall), nullptr) << "ROW must not be a FunctionCall";
+}
+
+TEST_F(ExprHardeningTest, SingleParenIsGroupingNotRow) {
+    // CRITICAL regression guard: (a + b) with NO comma is ordinary grouping,
+    // NOT a one-element row constructor.
+    auto* ast = parse("SELECT * FROM t WHERE (a + b) = 3");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    auto* lhs = pred->first_child;
+    ASSERT_NE(lhs, nullptr);
+    EXPECT_EQ(lhs->node_type, NodeType::BinaryExpr);  // the (a + b) group
+    EXPECT_EQ(lhs->primary_text, "+");
+    EXPECT_EQ(find(ast, NodeType::RowConstructor), nullptr) << "no comma -> no row";
+}
