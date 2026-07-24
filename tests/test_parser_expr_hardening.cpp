@@ -385,3 +385,36 @@ TEST_F(ExprHardeningTest, PlainLikeStillParses) {
     EXPECT_EQ(pred->node_type, NodeType::LikeExpr);
     EXPECT_EQ(pred->primary_text, "LIKE");
 }
+
+// ---- Aggregate FILTER (WHERE ...) -----------------------------------------
+
+TEST_F(ExprHardeningTest, AggregateFilterAttachesWhereClause) {
+    // COUNT(*) FILTER (WHERE age > 20): the FILTER predicate attaches as a
+    // WhereClause child of the call, distinct from the (star) argument.
+    auto* ast = parse("SELECT COUNT(*) FILTER (WHERE age > 20) FROM users");
+    ASSERT_NE(ast, nullptr);
+    auto* call = find(ast, NodeType::FunctionCall);
+    ASSERT_NE(call, nullptr);
+    EXPECT_EQ(call->primary_text, "COUNT");
+    // Find the WhereClause (FILTER) child.
+    ASTNode* filter = nullptr;
+    for (auto* c = call->first_child; c; c = c->next_sibling)
+        if (c->node_type == NodeType::WhereClause) { filter = c; break; }
+    ASSERT_NE(filter, nullptr) << "FILTER should attach a WhereClause child";
+    EXPECT_EQ(filter->primary_text, "FILTER");
+    // Its child is the predicate.
+    auto* pred = filter->first_child;
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, ">");
+}
+
+TEST_F(ExprHardeningTest, AggregateWithoutFilterHasNoWhereClause) {
+    // Regression guard: a plain aggregate has no WhereClause child.
+    auto* ast = parse("SELECT COUNT(*) FROM users");
+    ASSERT_NE(ast, nullptr);
+    auto* call = find(ast, NodeType::FunctionCall);
+    ASSERT_NE(call, nullptr);
+    for (auto* c = call->first_child; c; c = c->next_sibling)
+        EXPECT_NE(c->node_type, NodeType::WhereClause);
+}
