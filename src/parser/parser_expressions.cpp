@@ -534,6 +534,12 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
     if (!left) {
         return nullptr;
     }
+    // `::` cast shorthand binds as tightly as COLLATE (tighter than any binary
+    // operator), so apply it as a postfix here too.
+    left = parse_cast_postfix(left);
+    if (!left) {
+        return nullptr;
+    }
 
     // Loop to handle operators with precedence
     while (true) {
@@ -1104,6 +1110,65 @@ ast::ASTNode* Parser::parse_collate_postfix(ast::ASTNode* operand) {
         node->first_child = operand;
         node->child_count = 1;
         operand = node;
+    }
+    return operand;
+}
+
+ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand) {
+    // `<value>::<type>` is the PostgreSQL shorthand for CAST(<value> AS <type>).
+    // The tokenizer emits `::` as a single two-char token (typed Delimiter, since
+    // `:` is a delimiter), so match on the value. This builds the SAME CastExpr
+    // shape parse_cast_expression() produces - CastExpr with children
+    // [value, Identifier(typename)], the type's parameters (e.g. ::VARCHAR(100))
+    // stored on the type node's schema_name - so the analyzer and binder need no
+    // change. Chained casts (`a::int::text`) fold left via the loop.
+    while (operand != nullptr && current_token_ && current_token_->value == "::") {
+        advance();  // consume ::
+        if (!current_token_ ||
+            (current_token_->type != tokenizer::TokenType::Identifier &&
+             current_token_->type != tokenizer::TokenType::Keyword)) {
+            return operand;  // `::` without a type name: leave the value as-is
+        }
+        auto* cast_node = arena_.allocate<ast::ASTNode>();
+        new (cast_node) ast::ASTNode(ast::NodeType::CastExpr);
+        cast_node->node_id = next_node_id_++;
+        cast_node->primary_text = copy_to_arena("CAST");
+
+        auto* type_node = arena_.allocate<ast::ASTNode>();
+        new (type_node) ast::ASTNode(ast::NodeType::Identifier);
+        type_node->node_id = next_node_id_++;
+        type_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+
+        // Optional type parameters, e.g. `x::VARCHAR(100)`.
+        if (current_token_ && current_token_->value == "(") {
+            advance();  // consume (
+            int paren_depth = 1;
+            std::string type_params;
+            while (current_token_ && paren_depth > 0) {
+                if (current_token_->value == "(") {
+                    paren_depth++;
+                } else if (current_token_->value == ")") {
+                    paren_depth--;
+                    if (paren_depth == 0) break;
+                }
+                type_params += std::string(current_token_->value);
+                advance();
+            }
+            if (current_token_ && current_token_->value == ")") {
+                advance();  // consume final )
+            }
+            if (!type_params.empty()) {
+                type_node->schema_name = copy_to_arena(type_params);
+            }
+        }
+
+        operand->parent = cast_node;
+        cast_node->first_child = operand;
+        type_node->parent = cast_node;
+        operand->next_sibling = type_node;
+        cast_node->child_count = 2;
+        operand = cast_node;
     }
     return operand;
 }
