@@ -166,11 +166,19 @@ TEST_F(ArenaStressTest, ManySmallAllocations) {
     auto end = high_resolution_clock::now();
     auto duration = duration_cast<milliseconds>(end - start);
     
-    std::cout << "1 million small allocations took: " 
+    std::cout << "1 million small allocations took: "
               << duration.count() << " ms\n";
-    
-    EXPECT_LT(duration.count(), 100) 
+
+    // Wall-clock budgets are only meaningful in optimized builds; -O0 debug
+    // builds and sanitizer/CI runs inflate the time well past the budget, so
+    // the assertion is enforced only under NDEBUG and skipped otherwise (same
+    // guard as AllocationSpeed / MixedSizeAllocationSpeed above).
+#ifdef NDEBUG
+    EXPECT_LT(duration.count(), 100)
         << "1 million allocations should take < 100ms";
+#else
+    GTEST_SKIP() << "Timing assertion only enforced in optimized (NDEBUG) builds";
+#endif
 }
 
 TEST_F(ArenaStressTest, ResetPerformance) {
