@@ -484,6 +484,22 @@ TEST_F(ExprHardeningTest, DefaultClauseCapturesExprText) {
     EXPECT_EQ(d2->primary_text, "now()");
 }
 
+TEST_F(ExprHardeningTest, AlterColumnSetDefaultCapturesExprText) {
+    // ALTER COLUMN SET DEFAULT wraps the new default in a DefaultClause carrying
+    // the verbatim source text, exactly like a column-definition DEFAULT.
+    auto* ast = parse("ALTER TABLE t ALTER COLUMN a SET DEFAULT 42");
+    ASSERT_NE(ast, nullptr);
+    auto* d = find(ast, NodeType::DefaultClause);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->primary_text, "42");
+
+    auto* fn = parse("ALTER TABLE t ALTER COLUMN ts SET DEFAULT now()");
+    ASSERT_NE(fn, nullptr);
+    auto* d2 = find(fn, NodeType::DefaultClause);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(d2->primary_text, "now()");
+}
+
 // ---- DDL column lists (previously stubbed) --------------------------------
 
 TEST_F(ExprHardeningTest, CreateIndexCapturesColumns) {
