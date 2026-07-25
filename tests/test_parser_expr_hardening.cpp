@@ -500,6 +500,34 @@ TEST_F(ExprHardeningTest, AlterColumnSetDefaultCapturesExprText) {
     EXPECT_EQ(d2->primary_text, "now()");
 }
 
+TEST_F(ExprHardeningTest, AlterTableAddConstraint) {
+    // ADD [table-constraint] parses to the matching constraint node under the
+    // ALTER action, not a column definition.
+    auto* pk = parse("ALTER TABLE t ADD PRIMARY KEY (a, b)");
+    ASSERT_NE(pk, nullptr);
+    ASSERT_NE(find(pk, NodeType::PrimaryKeyConstraint), nullptr);
+    EXPECT_EQ(find(pk, NodeType::ColumnDefinition), nullptr);
+
+    auto* uq = parse("ALTER TABLE t ADD UNIQUE (email)");
+    ASSERT_NE(uq, nullptr);
+    EXPECT_NE(find(uq, NodeType::UniqueConstraint), nullptr);
+
+    auto* ck = parse("ALTER TABLE t ADD CHECK (age >= 0)");
+    ASSERT_NE(ck, nullptr);
+    auto* chk = find(ck, NodeType::CheckConstraint);
+    ASSERT_NE(chk, nullptr);
+    EXPECT_EQ(chk->primary_text, "age >= 0");
+
+    auto* fk = parse("ALTER TABLE t ADD FOREIGN KEY (pid) REFERENCES parent (id)");
+    ASSERT_NE(fk, nullptr);
+    EXPECT_NE(find(fk, NodeType::ForeignKeyConstraint), nullptr);
+
+    // ADD COLUMN still works (no constraint keyword).
+    auto* col = parse("ALTER TABLE t ADD COLUMN c INTEGER");
+    ASSERT_NE(col, nullptr);
+    EXPECT_NE(find(col, NodeType::ColumnDefinition), nullptr);
+}
+
 TEST_F(ExprHardeningTest, AlterColumnSetDropNotNull) {
     // SET NOT NULL / DROP NOT NULL are recorded as flags on the action node.
     auto* a1 = parse("ALTER TABLE t ALTER COLUMN c SET NOT NULL");
