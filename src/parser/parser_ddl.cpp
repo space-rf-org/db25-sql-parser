@@ -25,6 +25,13 @@ namespace {
     }
     return value;
 }
+
+[[nodiscard]] std::string_view trim_ws(std::string_view s) noexcept {
+    auto ws = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    while (!s.empty() && ws(s.front())) s.remove_prefix(1);
+    while (!s.empty() && ws(s.back())) s.remove_suffix(1);
+    return s;
+}
 } // namespace
 
 // ========== DDL Entry Points ==========
@@ -492,15 +499,25 @@ ast::ASTNode* Parser::parse_column_constraint() {
         if (current_token_ && current_token_->value == "(") {
             advance(); // consume (
             parenthesis_depth_++;
-            
-            // Parse check expression
+
+            // Capture the exact source text of the check expression: both tokens
+            // view into the same source buffer, so the span runs from the first
+            // expression token to the closing paren. Stored on primary_text for
+            // faithful persistence downstream (no lossy AST reconstruction).
+            const char* expr_begin = current_token_ ? current_token_->value.data() : nullptr;
             auto* expr = parse_expression(0);
             if (expr) {
                 expr->parent = constraint;
                 constraint->first_child = expr;
                 constraint->child_count = 1;
             }
-            
+            if (expr_begin != nullptr && current_token_ != nullptr &&
+                current_token_->value.data() >= expr_begin) {
+                const std::string_view text = trim_ws(std::string_view(
+                    expr_begin, static_cast<std::size_t>(current_token_->value.data() - expr_begin)));
+                constraint->primary_text = copy_to_arena(text);
+            }
+
             if (current_token_ && current_token_->value == ")") {
                 advance(); // consume )
                 parenthesis_depth_--;
@@ -511,13 +528,22 @@ ast::ASTNode* Parser::parse_column_constraint() {
         constraint = arena_.allocate<ast::ASTNode>();
         new (constraint) ast::ASTNode(ast::NodeType::DefaultClause);
         constraint->node_id = next_node_id_++;
-        
-        // Parse default expression
+
+        // Capture the default expression's source text (see CHECK above). The
+        // span runs from the first token to whatever follows the default (a
+        // comma, another constraint keyword, or the closing paren).
+        const char* expr_begin = current_token_ ? current_token_->value.data() : nullptr;
         auto* expr = parse_primary_expression();
         if (expr) {
             expr->parent = constraint;
             constraint->first_child = expr;
             constraint->child_count = 1;
+        }
+        if (expr_begin != nullptr && current_token_ != nullptr &&
+            current_token_->value.data() >= expr_begin) {
+            const std::string_view text = trim_ws(std::string_view(
+                expr_begin, static_cast<std::size_t>(current_token_->value.data() - expr_begin)));
+            constraint->primary_text = copy_to_arena(text);
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::REFERENCES) {
         // Foreign key constraint
@@ -786,22 +812,28 @@ ast::ASTNode* Parser::parse_table_constraint() {
         if (current_token_ && current_token_->value == "(") {
             advance(); // consume (
             parenthesis_depth_++;
-            
-            // Parse check expression
+
+            const char* expr_begin = current_token_ ? current_token_->value.data() : nullptr;
             auto* expr = parse_expression(0);
             if (expr) {
                 expr->parent = constraint;
                 constraint->first_child = expr;
                 constraint->child_count = 1;
             }
-            
+            if (expr_begin != nullptr && current_token_ != nullptr &&
+                current_token_->value.data() >= expr_begin) {
+                const std::string_view text = trim_ws(std::string_view(
+                    expr_begin, static_cast<std::size_t>(current_token_->value.data() - expr_begin)));
+                constraint->primary_text = copy_to_arena(text);
+            }
+
             if (current_token_ && current_token_->value == ")") {
                 advance(); // consume )
                 parenthesis_depth_--;
             }
         }
     }
-    
+
     return constraint;
 }
 

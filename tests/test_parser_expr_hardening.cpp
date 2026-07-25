@@ -452,6 +452,38 @@ TEST_F(ExprHardeningTest, ExplicitRowKeywordBuildsRowConstructor) {
     EXPECT_EQ(find(ast, NodeType::FunctionCall), nullptr) << "ROW must not be a FunctionCall";
 }
 
+// ---- DDL CHECK / DEFAULT expression source text ---------------------------
+
+TEST_F(ExprHardeningTest, CheckConstraintCapturesExprText) {
+    auto* ast = parse("CREATE TABLE t (age INTEGER CHECK (age >= 18))");
+    ASSERT_NE(ast, nullptr);
+    auto* chk = find(ast, NodeType::CheckConstraint);
+    ASSERT_NE(chk, nullptr);
+    EXPECT_EQ(chk->primary_text, "age >= 18");
+}
+
+TEST_F(ExprHardeningTest, TableCheckCapturesExprText) {
+    auto* ast = parse("CREATE TABLE t (a INTEGER, b INTEGER, CHECK (a < b))");
+    ASSERT_NE(ast, nullptr);
+    auto* chk = find(ast, NodeType::CheckConstraint);
+    ASSERT_NE(chk, nullptr);
+    EXPECT_EQ(chk->primary_text, "a < b");
+}
+
+TEST_F(ExprHardeningTest, DefaultClauseCapturesExprText) {
+    auto* lit = parse("CREATE TABLE t (a INTEGER DEFAULT 0)");
+    ASSERT_NE(lit, nullptr);
+    auto* d1 = find(lit, NodeType::DefaultClause);
+    ASSERT_NE(d1, nullptr);
+    EXPECT_EQ(d1->primary_text, "0");
+
+    auto* fn = parse("CREATE TABLE t (a TIMESTAMP DEFAULT now())");
+    ASSERT_NE(fn, nullptr);
+    auto* d2 = find(fn, NodeType::DefaultClause);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(d2->primary_text, "now()");
+}
+
 // ---- DDL column lists (previously stubbed) --------------------------------
 
 TEST_F(ExprHardeningTest, CreateIndexCapturesColumns) {
