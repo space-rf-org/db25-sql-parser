@@ -528,6 +528,43 @@ TEST_F(ExprHardeningTest, AlterTableAddConstraint) {
     EXPECT_NE(find(col, NodeType::ColumnDefinition), nullptr);
 }
 
+TEST_F(ExprHardeningTest, NamedConstraintCapturesName) {
+    // The optional CONSTRAINT <name> is captured on the constraint node's
+    // schema_name (not primary_text, which a CHECK uses for its expression).
+    auto* ast = parse("CREATE TABLE t (a INTEGER, CONSTRAINT uq_a UNIQUE (a))");
+    ASSERT_NE(ast, nullptr);
+    auto* u = find(ast, NodeType::UniqueConstraint);
+    ASSERT_NE(u, nullptr);
+    EXPECT_EQ(u->schema_name, "uq_a");
+
+    auto* ck = parse("CREATE TABLE t (a INTEGER, CONSTRAINT ck_a CHECK (a > 0))");
+    ASSERT_NE(ck, nullptr);
+    auto* c = find(ck, NodeType::CheckConstraint);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->schema_name, "ck_a");     // name
+    EXPECT_EQ(c->primary_text, "a > 0");   // expression, unaffected
+}
+
+TEST_F(ExprHardeningTest, AlterDropConstraint) {
+    // DROP CONSTRAINT <name> flags the action (0x20) and names it as an
+    // Identifier child, distinct from DROP COLUMN.
+    auto* ast = parse("ALTER TABLE t DROP CONSTRAINT uq_a");
+    ASSERT_NE(ast, nullptr);
+    auto* act = find(ast, NodeType::AlterTableAction);
+    ASSERT_NE(act, nullptr);
+    EXPECT_TRUE(act->semantic_flags & 0x20);
+    auto* nm = find(act, NodeType::Identifier);
+    ASSERT_NE(nm, nullptr);
+    EXPECT_EQ(nm->primary_text, "uq_a");
+
+    // DROP COLUMN is still not flagged as a constraint drop.
+    auto* col = parse("ALTER TABLE t DROP COLUMN a");
+    ASSERT_NE(col, nullptr);
+    auto* act2 = find(col, NodeType::AlterTableAction);
+    ASSERT_NE(act2, nullptr);
+    EXPECT_FALSE(act2->semantic_flags & 0x20);
+}
+
 TEST_F(ExprHardeningTest, AlterColumnSetDropNotNull) {
     // SET NOT NULL / DROP NOT NULL are recorded as flags on the action node.
     auto* a1 = parse("ALTER TABLE t ALTER COLUMN c SET NOT NULL");
