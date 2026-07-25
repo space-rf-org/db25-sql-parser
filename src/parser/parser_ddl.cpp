@@ -1001,17 +1001,35 @@ ast::ASTNode* Parser::parse_alter_table_full() {
     if (current_token_ && current_token_->keyword_id == db25::Keyword::ADD) {
         advance();
         action->primary_text = copy_to_arena("ADD");
-        
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::COLUMN) {
-            advance(); // optional COLUMN keyword
-        }
-        
-        // Parse column definition
-        auto* column = parse_column_definition();
-        if (column) {
-            column->parent = action;
-            action->first_child = column;
-            action->child_count = 1;
+
+        // ADD [CONSTRAINT ...] PRIMARY KEY / UNIQUE / CHECK / FOREIGN KEY adds a
+        // table-level constraint; anything else is ADD [COLUMN] <definition>. The
+        // leading keyword disambiguates (a column name is never one of these).
+        const bool is_table_constraint =
+            current_token_ &&
+            (current_token_->keyword_id == db25::Keyword::CONSTRAINT ||
+             current_token_->keyword_id == db25::Keyword::PRIMARY ||
+             current_token_->keyword_id == db25::Keyword::UNIQUE ||
+             current_token_->keyword_id == db25::Keyword::CHECK ||
+             current_token_->keyword_id == db25::Keyword::FOREIGN);
+
+        if (is_table_constraint) {
+            auto* constraint = parse_table_constraint();
+            if (constraint) {
+                constraint->parent = action;
+                action->first_child = constraint;
+                action->child_count = 1;
+            }
+        } else {
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::COLUMN) {
+                advance(); // optional COLUMN keyword
+            }
+            auto* column = parse_column_definition();
+            if (column) {
+                column->parent = action;
+                action->first_child = column;
+                action->child_count = 1;
+            }
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::DROP) {
         advance();
