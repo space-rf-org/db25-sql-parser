@@ -452,6 +452,48 @@ TEST_F(ExprHardeningTest, ExplicitRowKeywordBuildsRowConstructor) {
     EXPECT_EQ(find(ast, NodeType::FunctionCall), nullptr) << "ROW must not be a FunctionCall";
 }
 
+// ---- DDL column lists (previously stubbed) --------------------------------
+
+TEST_F(ExprHardeningTest, CreateIndexCapturesColumns) {
+    auto* ast = parse("CREATE INDEX idx_uc ON users (last, first)");
+    ASSERT_NE(ast, nullptr);
+    auto* idx = find(ast, NodeType::CreateIndexStmt);
+    ASSERT_NE(idx, nullptr);
+    EXPECT_EQ(idx->primary_text, "idx_uc");
+    EXPECT_EQ(idx->schema_name, "users");
+    EXPECT_EQ(count(idx, NodeType::Identifier), 2);  // last, first
+    ASSERT_NE(idx->first_child, nullptr);
+    EXPECT_EQ(idx->first_child->node_type, NodeType::Identifier);
+    EXPECT_EQ(idx->first_child->primary_text, "last");
+}
+
+TEST_F(ExprHardeningTest, TableLevelForeignKeyCapturesColumnsAndReferences) {
+    auto* ast = parse(
+        "CREATE TABLE orders (uid INTEGER, "
+        "FOREIGN KEY (uid) REFERENCES users (id))");
+    ASSERT_NE(ast, nullptr);
+    auto* fk = find(ast, NodeType::ForeignKeyConstraint);
+    ASSERT_NE(fk, nullptr);
+    // First child is the local column; then a ReferencesClause.
+    ASSERT_NE(fk->first_child, nullptr);
+    EXPECT_EQ(fk->first_child->node_type, NodeType::Identifier);
+    EXPECT_EQ(fk->first_child->primary_text, "uid");
+    auto* ref = find(fk, NodeType::ReferencesClause);
+    ASSERT_NE(ref, nullptr);
+    EXPECT_EQ(ref->primary_text, "users");                     // referenced table
+    ASSERT_NE(ref->first_child, nullptr);
+    EXPECT_EQ(ref->first_child->node_type, NodeType::Identifier);
+    EXPECT_EQ(ref->first_child->primary_text, "id");           // referenced column
+}
+
+TEST_F(ExprHardeningTest, TableLevelUniqueCapturesColumns) {
+    auto* ast = parse("CREATE TABLE t (a INTEGER, b INTEGER, UNIQUE (a, b))");
+    ASSERT_NE(ast, nullptr);
+    auto* uq = find(ast, NodeType::UniqueConstraint);
+    ASSERT_NE(uq, nullptr);
+    EXPECT_EQ(count(uq, NodeType::Identifier), 2);
+}
+
 TEST_F(ExprHardeningTest, SingleParenIsGroupingNotRow) {
     // CRITICAL regression guard: (a + b) with NO comma is ordinary grouping,
     // NOT a one-element row constructor.

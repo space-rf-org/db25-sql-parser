@@ -243,6 +243,9 @@ protected:
     [[nodiscard]] ast::ASTNode* parse_column_definition();
     [[nodiscard]] ast::ASTNode* parse_column_constraint();
     [[nodiscard]] ast::ASTNode* parse_table_constraint();
+    // Parse a parenthesized identifier list "( a, b, ... )" and attach each name
+    // as an Identifier child of `parent`. Returns the number of names consumed.
+    int parse_paren_identifier_list(ast::ASTNode* parent);
     
     // Transaction control statements
     [[nodiscard]] ast::ASTNode* parse_transaction_stmt();

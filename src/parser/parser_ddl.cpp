@@ -177,17 +177,12 @@ ast::ASTNode* Parser::parse_create_index_impl() {
         }
     }
     
-    // Parse column list (simplified)
+    // Parse the indexed column list, attaching each column as an Identifier
+    // child of the CREATE INDEX node.
     if (current_token_ && current_token_->value == "(") {
-        int paren_depth = 1;
-        advance();
-        while (current_token_ && paren_depth > 0) {
-            if (current_token_->value == "(") paren_depth++;
-            else if (current_token_->value == ")") paren_depth--;
-            advance();
-        }
+        parse_paren_identifier_list(create_node);
     }
-    
+
     return create_node;
 }
 
@@ -582,6 +577,49 @@ ast::ASTNode* Parser::parse_column_constraint() {
 }
 
 // Parse column definition
+int Parser::parse_paren_identifier_list(ast::ASTNode* parent) {
+    int count = 0;
+    if (!current_token_ || current_token_->value != "(") return 0;
+    advance();  // consume '('
+    parenthesis_depth_++;
+    ast::ASTNode* last = parent->first_child;
+    while (last != nullptr && last->next_sibling != nullptr) last = last->next_sibling;
+    // A column name may be an identifier or a non-reserved keyword used as a
+    // name (e.g. FIRST, LAST), matching how the rest of the parser accepts
+    // keywords in name position.
+    while (current_token_ &&
+           (current_token_->type == tokenizer::TokenType::Identifier ||
+            current_token_->type == tokenizer::TokenType::Keyword)) {
+        auto* col = arena_.allocate<ast::ASTNode>();
+        new (col) ast::ASTNode(ast::NodeType::Identifier);
+        col->node_id = next_node_id_++;
+        col->primary_text = copy_to_arena(current_token_->value);
+        col->parent = parent;
+        if (parent->first_child == nullptr) {
+            parent->first_child = col;
+        } else if (last != nullptr) {
+            last->next_sibling = col;
+        }
+        last = col;
+        parent->child_count++;
+        ++count;
+        advance();
+        if (current_token_ && current_token_->value == ",") {
+            advance();
+        } else {
+            break;
+        }
+    }
+    // Consume through the closing ')', tolerating anything unexpected so a
+    // malformed list cannot desynchronise the enclosing parser.
+    while (current_token_ && current_token_->value != ")") advance();
+    if (current_token_ && current_token_->value == ")") {
+        advance();  // consume ')'
+        if (parenthesis_depth_ > 0) parenthesis_depth_--;
+    }
+    return count;
+}
+
 ast::ASTNode* Parser::parse_column_definition() {
     if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
     
@@ -695,18 +733,38 @@ ast::ASTNode* Parser::parse_table_constraint() {
             constraint = arena_.allocate<ast::ASTNode>();
             new (constraint) ast::ASTNode(ast::NodeType::ForeignKeyConstraint);
             constraint->node_id = next_node_id_++;
-            
-            // Parse local columns
+
+            // Local columns: FOREIGN KEY (a, b, ...) - attached as Identifier
+            // children of the constraint.
             if (current_token_ && current_token_->value == "(") {
-                // Parse column list (similar to above)
-                // ... (implementation similar to PRIMARY KEY)
+                parse_paren_identifier_list(constraint);
             }
-            
-            // Parse REFERENCES
+
+            // REFERENCES <table> (<cols>): the referenced table + columns live
+            // under a ReferencesClause child so they are unambiguously distinct
+            // from the local columns above.
             if (current_token_ && current_token_->keyword_id == db25::Keyword::REFERENCES) {
                 advance();
-                // Parse referenced table and columns
-                // ... (implementation as in column constraint)
+                auto* ref = arena_.allocate<ast::ASTNode>();
+                new (ref) ast::ASTNode(ast::NodeType::ReferencesClause);
+                ref->node_id = next_node_id_++;
+                if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+                    ref->primary_text = copy_to_arena(current_token_->value);  // ref table
+                    advance();
+                }
+                if (current_token_ && current_token_->value == "(") {
+                    parse_paren_identifier_list(ref);  // referenced columns
+                }
+                ref->parent = constraint;
+                // Append the ReferencesClause after any local-column children.
+                if (constraint->first_child == nullptr) {
+                    constraint->first_child = ref;
+                } else {
+                    ast::ASTNode* last = constraint->first_child;
+                    while (last->next_sibling != nullptr) last = last->next_sibling;
+                    last->next_sibling = ref;
+                }
+                constraint->child_count++;
             }
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::UNIQUE) {
@@ -714,11 +772,10 @@ ast::ASTNode* Parser::parse_table_constraint() {
         constraint = arena_.allocate<ast::ASTNode>();
         new (constraint) ast::ASTNode(ast::NodeType::UniqueConstraint);
         constraint->node_id = next_node_id_++;
-        
-        // Parse column list
+
+        // UNIQUE (a, b, ...): columns attached as Identifier children.
         if (current_token_ && current_token_->value == "(") {
-            // Parse column list (similar to PRIMARY KEY)
-            // ... (implementation similar to PRIMARY KEY)
+            parse_paren_identifier_list(constraint);
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::CHECK) {
         advance();

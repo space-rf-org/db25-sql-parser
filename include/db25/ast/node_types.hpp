@@ -57,6 +57,7 @@ enum class NodeType : uint8_t {
     ForeignKeyConstraint,
     PrimaryKeyConstraint,
     UniqueConstraint,
+    ReferencesClause,  // REFERENCES <table> (<cols>) inside a table-level FK
     IndexColumn,
     AlterTableAction,
     
