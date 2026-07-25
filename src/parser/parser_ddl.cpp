@@ -717,16 +717,18 @@ ast::ASTNode* Parser::parse_table_constraint() {
     if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
     
     ast::ASTNode* constraint = nullptr;
-    
-    // Optional CONSTRAINT name
+
+    // Optional CONSTRAINT <name>: capture the name so it can be attached to the
+    // constraint node below (needed for ALTER TABLE DROP CONSTRAINT <name>).
+    std::string_view constraint_name;
     if (current_token_ && current_token_->keyword_id == db25::Keyword::CONSTRAINT) {
         advance();
-        // Skip constraint name for now
         if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+            constraint_name = current_token_->value;
             advance();
         }
     }
-    
+
     if (current_token_ && current_token_->keyword_id == db25::Keyword::PRIMARY) {
         advance();
         if (current_token_ && current_token_->keyword_id == db25::Keyword::KEY) {
@@ -852,6 +854,12 @@ ast::ASTNode* Parser::parse_table_constraint() {
                 parenthesis_depth_--;
             }
         }
+    }
+
+    // Attach the optional constraint name (stored on schema_name so it does not
+    // collide with primary_text, which a CHECK uses for its expression text).
+    if (constraint != nullptr && !constraint_name.empty()) {
+        constraint->schema_name = copy_to_arena(constraint_name);
     }
 
     return constraint;
@@ -1034,11 +1042,37 @@ ast::ASTNode* Parser::parse_alter_table_full() {
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::DROP) {
         advance();
         action->primary_text = copy_to_arena("DROP");
-        
+
+        // DROP CONSTRAINT <name> [CASCADE|RESTRICT]: flagged distinctly from
+        // DROP COLUMN. The name is attached as an Identifier child.
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::CONSTRAINT) {
+            advance(); // consume CONSTRAINT
+            action->semantic_flags |= 0x20;  // DROP CONSTRAINT flag
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+                auto* nm = arena_.allocate<ast::ASTNode>();
+                new (nm) ast::ASTNode(ast::NodeType::Identifier);
+                nm->node_id = next_node_id_++;
+                nm->primary_text = copy_to_arena(current_token_->value);
+                nm->parent = action;
+                action->first_child = nm;
+                action->child_count = 1;
+                advance();
+            }
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::CASCADE) {
+                action->semantic_flags |= 0x01;  // CASCADE
+                advance();
+            } else if (current_token_ &&
+                       current_token_->keyword_id == db25::Keyword::RESTRICT) {
+                action->semantic_flags |= 0x02;  // RESTRICT
+                advance();
+            }
+            return alter_node;
+        }
+
         if (current_token_ && current_token_->keyword_id == db25::Keyword::COLUMN) {
             advance(); // optional COLUMN keyword
         }
-        
+
         // Get column name
         if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
             auto* col = arena_.allocate<ast::ASTNode>();
