@@ -205,6 +205,7 @@ void ASTNode::remove_child(ASTNode* const child) noexcept {
         case NodeType::IntervalLiteral: return "IntervalLiteral";
         case NodeType::ArrayConstructor: return "ArrayConstructor";
         case NodeType::RowConstructor: return "RowConstructor";
+        case NodeType::ReferencesClause: return "ReferencesClause";
         case NodeType::JsonLiteral: return "JsonLiteral";
         case NodeType::CollateClause: return "CollateClause";
         case NodeType::SearchClause: return "SearchClause";
