@@ -1065,13 +1065,28 @@ ast::ASTNode* Parser::parse_alter_table_full() {
                 advance();
                 if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_DEFAULT) {
                     advance();
-                    // Parse default expression
+                    // Wrap the new default in a DefaultClause carrying the verbatim
+                    // expression source text, matching a column-definition DEFAULT
+                    // so downstream consumers read the default the same way in both
+                    // places (see parse_column_constraint).
+                    auto* def = arena_.allocate<ast::ASTNode>();
+                    new (def) ast::ASTNode(ast::NodeType::DefaultClause);
+                    def->node_id = next_node_id_++;
+                    def->parent = action;
+                    const char* expr_begin =
+                        current_token_ ? current_token_->value.data() : nullptr;
                     auto* expr = parse_expression(0);
                     if (expr) {
-                        expr->parent = action;
-                        col->next_sibling = expr;
-                        action->child_count++;
+                        expr->parent = def;
+                        def->first_child = expr;
+                        def->child_count = 1;
                     }
+                    const std::string_view text = expr_source_span(tokenizer_, expr_begin);
+                    if (!text.empty()) {
+                        def->primary_text = copy_to_arena(text);
+                    }
+                    col->next_sibling = def;
+                    action->child_count++;
                 }
             } else if (current_token_ && current_token_->keyword_id == db25::Keyword::DROP) {
                 advance();
