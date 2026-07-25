@@ -1087,12 +1087,24 @@ ast::ASTNode* Parser::parse_alter_table_full() {
                     }
                     col->next_sibling = def;
                     action->child_count++;
+                } else if (current_token_ && current_token_->keyword_id == db25::Keyword::NOT) {
+                    advance();  // consume NOT
+                    if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_NULL) {
+                        advance();  // consume NULL
+                        action->semantic_flags |= 0x08;  // SET NOT NULL flag
+                    }
                 }
             } else if (current_token_ && current_token_->keyword_id == db25::Keyword::DROP) {
                 advance();
                 if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_DEFAULT) {
                     advance();
                     action->semantic_flags |= 0x04;  // DROP DEFAULT flag
+                } else if (current_token_ && current_token_->keyword_id == db25::Keyword::NOT) {
+                    advance();  // consume NOT
+                    if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_NULL) {
+                        advance();  // consume NULL
+                        action->semantic_flags |= 0x10;  // DROP NOT NULL flag
+                    }
                 }
             } else if (current_token_ && current_token_->keyword_id == db25::Keyword::TYPE) {
                 advance();

@@ -500,6 +500,23 @@ TEST_F(ExprHardeningTest, AlterColumnSetDefaultCapturesExprText) {
     EXPECT_EQ(d2->primary_text, "now()");
 }
 
+TEST_F(ExprHardeningTest, AlterColumnSetDropNotNull) {
+    // SET NOT NULL / DROP NOT NULL are recorded as flags on the action node.
+    auto* a1 = parse("ALTER TABLE t ALTER COLUMN c SET NOT NULL");
+    ASSERT_NE(a1, nullptr);
+    auto* act1 = find(a1, NodeType::AlterTableAction);
+    ASSERT_NE(act1, nullptr);
+    EXPECT_TRUE(act1->semantic_flags & 0x08) << "SET NOT NULL flag";
+    EXPECT_FALSE(act1->semantic_flags & 0x10);
+
+    auto* a2 = parse("ALTER TABLE t ALTER COLUMN c DROP NOT NULL");
+    ASSERT_NE(a2, nullptr);
+    auto* act2 = find(a2, NodeType::AlterTableAction);
+    ASSERT_NE(act2, nullptr);
+    EXPECT_TRUE(act2->semantic_flags & 0x10) << "DROP NOT NULL flag";
+    EXPECT_FALSE(act2->semantic_flags & 0x08);
+}
+
 // ---- DDL column lists (previously stubbed) --------------------------------
 
 TEST_F(ExprHardeningTest, CreateIndexCapturesColumns) {
