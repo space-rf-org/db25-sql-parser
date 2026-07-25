@@ -32,6 +32,32 @@ namespace {
     while (!s.empty() && ws(s.back())) s.remove_suffix(1);
     return s;
 }
+
+// Return the trimmed source text of an expression that started at `expr_begin`
+// and has just been fully consumed. The end boundary is the END of the last
+// consumed token, obtained from the tokenizer's position - NOT the current
+// (lookahead) token's data().
+//
+// Using the current token as the end is unsafe: when an expression runs to the
+// end of input the current token is the synthetic EOF token, whose `value` is a
+// "" string literal living in read-only data, not a view into the SQL buffer.
+// Subtracting pointers across those two distinct objects is undefined behaviour
+// and in practice yields a multi-terabyte length, which then aborts the arena
+// allocator. The previous token is always a real token viewing into the same
+// SQL buffer as `expr_begin`, so its end pointer is well-defined.
+[[nodiscard]] std::string_view expr_source_span(
+        const tokenizer::Tokenizer* tok, const char* expr_begin) noexcept {
+    if (expr_begin == nullptr || tok == nullptr) return {};
+    const std::size_t pos = tok->position();
+    if (pos == 0) return {};                       // nothing consumed
+    const auto& tokens = tok->get_tokens();
+    if (pos > tokens.size()) return {};
+    const auto& last = tokens[pos - 1];            // last consumed token
+    const char* expr_end = last.value.data() + last.value.size();
+    if (expr_end <= expr_begin) return {};         // consumed nothing past begin
+    return trim_ws(std::string_view(
+        expr_begin, static_cast<std::size_t>(expr_end - expr_begin)));
+}
 } // namespace
 
 // ========== DDL Entry Points ==========
@@ -511,10 +537,8 @@ ast::ASTNode* Parser::parse_column_constraint() {
                 constraint->first_child = expr;
                 constraint->child_count = 1;
             }
-            if (expr_begin != nullptr && current_token_ != nullptr &&
-                current_token_->value.data() >= expr_begin) {
-                const std::string_view text = trim_ws(std::string_view(
-                    expr_begin, static_cast<std::size_t>(current_token_->value.data() - expr_begin)));
+            const std::string_view text = expr_source_span(tokenizer_, expr_begin);
+            if (!text.empty()) {
                 constraint->primary_text = copy_to_arena(text);
             }
 
@@ -539,10 +563,8 @@ ast::ASTNode* Parser::parse_column_constraint() {
             constraint->first_child = expr;
             constraint->child_count = 1;
         }
-        if (expr_begin != nullptr && current_token_ != nullptr &&
-            current_token_->value.data() >= expr_begin) {
-            const std::string_view text = trim_ws(std::string_view(
-                expr_begin, static_cast<std::size_t>(current_token_->value.data() - expr_begin)));
+        const std::string_view text = expr_source_span(tokenizer_, expr_begin);
+        if (!text.empty()) {
             constraint->primary_text = copy_to_arena(text);
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::REFERENCES) {
@@ -820,10 +842,8 @@ ast::ASTNode* Parser::parse_table_constraint() {
                 constraint->first_child = expr;
                 constraint->child_count = 1;
             }
-            if (expr_begin != nullptr && current_token_ != nullptr &&
-                current_token_->value.data() >= expr_begin) {
-                const std::string_view text = trim_ws(std::string_view(
-                    expr_begin, static_cast<std::size_t>(current_token_->value.data() - expr_begin)));
+            const std::string_view text = expr_source_span(tokenizer_, expr_begin);
+            if (!text.empty()) {
                 constraint->primary_text = copy_to_arena(text);
             }
 
