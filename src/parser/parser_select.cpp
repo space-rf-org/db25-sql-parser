@@ -1405,6 +1405,19 @@ ast::ASTNode* Parser::parse_identifier() {
 }
 
 ast::ASTNode* Parser::parse_table_reference() {
+    // A parenthesized join group `( a JOIN b )` recurses here via
+    // parse_from_clause() (see the is_join_group branch below), so a `(`-heavy
+    // FROM item like `FROM ((((...` would otherwise drive unbounded native
+    // recursion and overflow the stack. Unlike parse_select_stmt, this function
+    // and parse_from_clause carry no guard, so bound the recursion here (the one
+    // re-entrant point of the FROM cycle). The guard must be a plain
+    // function-scope local (not an if-init variable, which would be destroyed at
+    // the end of the if and decrement the depth before the recursive body runs),
+    // so the increment persists across the nested parse_from_clause() call.
+    DepthGuard guard(this);
+    if (!guard.is_valid()) {
+        return nullptr;
+    }
     if (!current_token_) {
         return nullptr;
     }
