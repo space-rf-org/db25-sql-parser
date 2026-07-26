@@ -37,6 +37,22 @@ std::string generate_nested_subqueries(int depth) {
     return sql.str();
 }
 
+// Generate deeply nested parenthesised join groups in FROM:
+// SELECT 1 FROM (((( ... t ... )))). Each '(' whose next token begins a table
+// reference is a join group and recurses parse_from_clause -> parse_table_reference.
+std::string generate_nested_from_groups(int depth) {
+    std::stringstream sql;
+    sql << "SELECT 1 FROM ";
+    for (int i = 0; i < depth; ++i) {
+        sql << "(";
+    }
+    sql << "t";
+    for (int i = 0; i < depth; ++i) {
+        sql << ")";
+    }
+    return sql.str();
+}
+
 // Generate deeply nested parenthesised expressions: SELECT (1 + (1 + ( ... 1 ... )))
 std::string generate_nested_expr(int depth) {
     std::stringstream sql;
@@ -73,6 +89,28 @@ TEST(DepthGuard, DeeplyNestedSubqueriesRejected) {
     auto result = parser.parse(sql);
     ASSERT_FALSE(result.has_value())
         << "Deeply nested subqueries must be rejected by the DepthGuard";
+    EXPECT_EQ(result.error().message, kDepthError);
+}
+
+// A modestly nested parenthesised FROM join group stays under the limit and parses.
+TEST(DepthGuard, ShallowNestedFromGroupParses) {
+    Parser parser;
+    auto result = parser.parse(generate_nested_from_groups(5));
+    ASSERT_TRUE(result.has_value())
+        << "Shallow FROM join group should parse, got error: " << result.error().message;
+}
+
+// Deeply nested parenthesised FROM join groups (`FROM ((((...`) previously drove
+// unbounded native recursion (parse_table_reference <-> parse_from_clause) and
+// overflowed the stack. They must now be rejected gracefully by the DepthGuard.
+TEST(DepthGuard, DeeplyNestedFromGroupsRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    const std::string sql = generate_nested_from_groups(static_cast<int>(limit) * 3);
+
+    auto result = parser.parse(sql);
+    ASSERT_FALSE(result.has_value())
+        << "Deeply nested FROM join groups must be rejected by the DepthGuard";
     EXPECT_EQ(result.error().message, kDepthError);
 }
 
