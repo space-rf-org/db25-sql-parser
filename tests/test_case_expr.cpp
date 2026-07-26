@@ -168,3 +168,33 @@ TEST_F(CaseExprTest, CaseWithNull) {
     auto* case_expr = find_node_by_type(ast, NodeType::CaseExpr);
     ASSERT_NE(case_expr, nullptr);
 }
+// A mixed-case `When` must be recognised as the searched-CASE keyword (SQL
+// keywords are case-insensitive): the CASE has no operand and its first child is
+// the WHEN branch, not a bogus `Identifier("When")` that dropped every branch.
+TEST_F(CaseExprTest, MixedCaseWhenIsSearchedCase) {
+    auto* ast = parse("SELECT CASE When x = 1 THEN 'a' ELSE 'b' END FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* case_expr = find_node_by_type(ast, NodeType::CaseExpr);
+    ASSERT_NE(case_expr, nullptr);
+    // Searched CASE: first child is the WHEN branch (a BinaryExpr "WHEN"), and no
+    // stray Identifier operand was captured.
+    ASSERT_NE(case_expr->first_child, nullptr);
+    EXPECT_EQ(case_expr->first_child->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(std::string(case_expr->first_child->primary_text), "WHEN");
+    // The whole input is consumed (the FROM is parsed, nothing dropped).
+    EXPECT_NE(find_node_by_type(ast, NodeType::FromClause), nullptr);
+}
+
+// A lower-case `when`/`then`/`else`/`end` parses the same (regression guard).
+TEST_F(CaseExprTest, LowerCaseKeywordsParse) {
+    auto* ast = parse("SELECT case when x = 1 then 'a' else 'b' end FROM t");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_NE(find_node_by_type(ast, NodeType::CaseExpr), nullptr);
+}
+
+// A CASE missing its closing END is malformed and must be rejected, not silently
+// accepted as a truncated expression.
+TEST_F(CaseExprTest, MissingEndIsRejected) {
+    auto* ast = parse("SELECT CASE WHEN a THEN b FROM t");
+    EXPECT_EQ(ast, nullptr);
+}
