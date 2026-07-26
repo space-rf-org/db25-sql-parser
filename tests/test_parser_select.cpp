@@ -623,3 +623,55 @@ TEST_F(SelectParserTest, DerivedTableStillParsesAsSubquery) {
     ASSERT_NE(subquery, nullptr) << "derived table must parse as a Subquery";
     EXPECT_EQ(subquery->schema_name, "x");  // alias preserved
 }
+
+TEST_F(SelectParserTest, DerivedTableColumnAliasListCaptured) {
+    // "( SELECT ... ) AS t (a, b)" renames the derived table's output columns.
+    // The list must be CONSUMED (no trailing input) and CAPTURED as a ColumnList
+    // of Identifier nodes under the Subquery - previously it was silently dropped.
+    auto result = parser.parse("SELECT * FROM (SELECT 1) AS t(a, b)");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(parser.has_trailing_input()) << "column-alias list must be consumed";
+
+    auto* from = find_child_by_type(result.value(), NodeType::FromClause);
+    ASSERT_NE(from, nullptr);
+    auto* subquery = find_child_by_type(from, NodeType::Subquery);
+    ASSERT_NE(subquery, nullptr);
+    EXPECT_EQ(subquery->schema_name, "t");
+
+    auto* col_list = find_child_by_type(subquery, NodeType::ColumnList);
+    ASSERT_NE(col_list, nullptr) << "column aliases must be captured, not dropped";
+    EXPECT_EQ(count_children(col_list), 2);
+    auto* first = col_list->get_first_child();
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->node_type, NodeType::Identifier);
+    EXPECT_EQ(first->primary_text, "a");
+    ASSERT_NE(first->get_next_sibling(), nullptr);
+    EXPECT_EQ(first->get_next_sibling()->primary_text, "b");
+
+    // The inner SELECT must still be reachable as a child (consumers read it).
+    EXPECT_NE(find_child_by_type(subquery, NodeType::SelectStmt), nullptr);
+}
+
+TEST_F(SelectParserTest, DerivedTableColumnAliasInsideSubqueryParses) {
+    // Regression: the same construct nested inside an expression subquery used to
+    // fail to parse - the unconsumed "(a)" broke ")" matching for the outer
+    // subquery. Both the IN-subquery and scalar-subquery positions must parse.
+    auto a = parser.parse("SELECT NULL IN (SELECT * FROM (SELECT 1) AS t(a))");
+    EXPECT_TRUE(a.has_value()) << "column-alias list inside an IN-subquery must parse";
+
+    parser.reset();
+    auto b = parser.parse("SELECT (SELECT max(x) FROM (SELECT 1) AS t(x))");
+    EXPECT_TRUE(b.has_value()) << "column-alias list inside a scalar subquery must parse";
+}
+
+TEST_F(SelectParserTest, InsertTargetColumnListNotMistakenForAlias) {
+    // Guard: parse_table_reference is shared with the INSERT path. The restriction
+    // to derived-table (Subquery) refs must leave an INSERT's target column list
+    // "(a, b, c)" for the DML parser, not steal it as an alias list.
+    auto r = parser.parse("INSERT INTO tbl (a, b, c) VALUES (1, 2, 3)");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r.value()->node_type, NodeType::InsertStmt);
+    auto* col_list = find_child_by_type(r.value(), NodeType::ColumnList);
+    ASSERT_NE(col_list, nullptr) << "INSERT target column list must be preserved";
+    EXPECT_EQ(count_children(col_list), 3);
+}

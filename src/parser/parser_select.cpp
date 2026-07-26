@@ -1558,6 +1558,74 @@ ast::ASTNode* Parser::parse_table_reference() {
         advance();
     }
 
+    // Optional column-alias list for a DERIVED TABLE: "(SELECT ...) AS t (a, b)".
+    // Standard SQL renames the relation's output columns. Without this the whole
+    // "(...)" was left unconsumed: at statement level the trailing tokens were
+    // silently tolerated (the aliases dropped), but inside an expression
+    // subquery the stray '(' broke ')' matching and failed the parse. Capture it
+    // as a ColumnList of Identifier nodes (the same shape a CTE column list
+    // uses).
+    //
+    // Restricted to a subquery ref: parse_table_reference is shared with the
+    // INSERT/UPDATE/DELETE target path, where "t (a, b)" is the INSERT target
+    // column list (parsed by the DML parser), not an alias list. Base-table
+    // column aliases ("FROM t x(a,b)") are rare and left as a follow-up. Guard
+    // on the paren being followed by an identifier so a "(1, 2)" is never taken
+    // as a column list.
+    if (ref_node->node_type == ast::NodeType::Subquery &&
+        current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
+        current_token_->value == "(" && peek_token_ &&
+        peek_token_->type == tokenizer::TokenType::Identifier) {
+        parenthesis_depth_++;
+        advance();  // consume '('
+
+        auto* col_list = arena_.allocate<ast::ASTNode>();
+        new (col_list) ast::ASTNode(ast::NodeType::ColumnList);
+        col_list->node_id = next_node_id_++;
+
+        ast::ASTNode* last_col = nullptr;
+        while (current_token_ &&
+               current_token_->type == tokenizer::TokenType::Identifier) {
+            auto* id = arena_.allocate<ast::ASTNode>();
+            new (id) ast::ASTNode(ast::NodeType::Identifier);
+            id->node_id = next_node_id_++;
+            id->primary_text = copy_to_arena(current_token_->value);
+            id->parent = col_list;
+            if (last_col) {
+                last_col->next_sibling = id;
+            } else {
+                col_list->first_child = id;
+            }
+            last_col = id;
+            col_list->child_count++;
+            advance();  // consume the identifier
+            if (current_token_ && current_token_->value == ",") {
+                advance();  // consume ',' and read the next column name
+                continue;
+            }
+            break;
+        }
+
+        if (current_token_ && current_token_->value == ")") {
+            if (parenthesis_depth_ > 0) parenthesis_depth_--;
+            advance();  // consume ')'
+        }
+
+        // Attach as the LAST child so consumers that read the derived table's
+        // inner query block (via find_child / first_child) are unaffected.
+        col_list->parent = ref_node;
+        if (ref_node->first_child) {
+            ast::ASTNode* c = ref_node->first_child;
+            while (c->next_sibling) {
+                c = c->next_sibling;
+            }
+            c->next_sibling = col_list;
+        } else {
+            ref_node->first_child = col_list;
+        }
+        ref_node->child_count++;
+    }
+
     return ref_node;
 }
 
