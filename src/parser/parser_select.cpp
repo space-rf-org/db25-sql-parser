@@ -1419,7 +1419,8 @@ ast::ASTNode* Parser::parse_table_reference() {
         const bool is_derived_table =
             peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword &&
             (peek_token_->keyword_id == db25::Keyword::SELECT ||
-             peek_token_->keyword_id == db25::Keyword::WITH);
+             peek_token_->keyword_id == db25::Keyword::WITH ||
+             peek_token_->keyword_id == db25::Keyword::VALUES);
         // A parenthesized join group begins with something that itself begins a
         // table reference: an identifier (table name) or a nested '('.
         const bool is_join_group =
@@ -1438,11 +1439,22 @@ ast::ASTNode* Parser::parse_table_reference() {
             subquery_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::IsSubquery);
 
             push_context(ParseContext::SUBQUERY);
-            auto* inner = (current_token_ &&
-                           current_token_->type == tokenizer::TokenType::Keyword &&
-                           current_token_->keyword_id == db25::Keyword::WITH)
-                              ? parse_with_statement()
-                              : parse_select_stmt();
+            // The derived-table body is a SELECT, a WITH ... SELECT, or a VALUES
+            // list ( "(VALUES (1, 2), (3, 4)) AS t (a, b)" ). Dispatch on the
+            // leading keyword; without the VALUES arm the "(" matched neither a
+            // derived table nor a join group, so the whole FROM item was dropped.
+            ast::ASTNode* inner = nullptr;
+            if (current_token_ &&
+                current_token_->type == tokenizer::TokenType::Keyword &&
+                current_token_->keyword_id == db25::Keyword::WITH) {
+                inner = parse_with_statement();
+            } else if (current_token_ &&
+                       current_token_->type == tokenizer::TokenType::Keyword &&
+                       current_token_->keyword_id == db25::Keyword::VALUES) {
+                inner = parse_values_stmt();
+            } else {
+                inner = parse_select_stmt();
+            }
             pop_context();
             if (inner) {
                 inner->parent = subquery_node;

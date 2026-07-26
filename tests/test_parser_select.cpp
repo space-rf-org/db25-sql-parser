@@ -675,3 +675,30 @@ TEST_F(SelectParserTest, InsertTargetColumnListNotMistakenForAlias) {
     ASSERT_NE(col_list, nullptr) << "INSERT target column list must be preserved";
     EXPECT_EQ(count_children(col_list), 3);
 }
+
+TEST_F(SelectParserTest, ValuesDerivedTableInFrom) {
+    // "( VALUES (..), (..) ) AS t" is a derived table whose body is a VALUES
+    // list. Previously the "(" matched neither a derived table (only SELECT/WITH
+    // were recognized) nor a join group, so the ENTIRE FROM clause was silently
+    // dropped. It must now parse to FromClause -> Subquery -> ValuesStmt.
+    auto result = parser.parse("SELECT * FROM (VALUES (1, 2), (3, 4)) AS t");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(parser.has_trailing_input());
+
+    auto* from = find_child_by_type(result.value(), NodeType::FromClause);
+    ASSERT_NE(from, nullptr) << "FROM clause must not be dropped for a VALUES source";
+
+    auto* subquery = find_child_by_type(from, NodeType::Subquery);
+    ASSERT_NE(subquery, nullptr) << "VALUES source must parse as a derived table";
+    EXPECT_EQ(subquery->schema_name, "t");
+    EXPECT_NE(find_child_by_type(subquery, NodeType::ValuesStmt), nullptr)
+        << "derived-table body must be a ValuesStmt";
+}
+
+TEST_F(SelectParserTest, ValuesDerivedTableInsideSubqueryParses) {
+    // Regression: a VALUES derived table nested inside an expression subquery used
+    // to fail to parse outright (the unrecognized "(" cascaded into a paren
+    // mismatch on the outer subquery).
+    auto r = parser.parse("SELECT NULL IN (SELECT * FROM (VALUES (1)) AS t)");
+    EXPECT_TRUE(r.has_value()) << "VALUES derived table inside an IN-subquery must parse";
+}
