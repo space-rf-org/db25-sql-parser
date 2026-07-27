@@ -515,8 +515,14 @@ ast::ASTNode* Parser::parse_parenthesized_query() {
         // `( VALUES (..), (..) )` is a query block too. Without this, VALUES fell
         // to the SELECT path below and parse_select_stmt consumed the `VALUES`
         // keyword as if it were `SELECT`, silently transposing the rows into a
-        // one-row select list.
-        inner = parse_values_stmt();
+        // one-row select list. VALUES may also be the LEFT operand of a set
+        // operation INSIDE the parens (`( VALUES (1) UNION SELECT 2 )`), so fold
+        // any set-op tail here - exactly as the SELECT and nested-paren branches
+        // do - rather than leaving the `UNION ...` unconsumed (which then failed
+        // the `)` check and dropped the whole query).
+        if (ast::ASTNode* v = parse_values_stmt()) {
+            inner = fold_set_operations(v);
+        }
     } else if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
                current_token_->value == "(") {
         // Nested parenthesized query expression: `((SELECT 1) UNION (SELECT 2))`.

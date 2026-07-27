@@ -516,3 +516,102 @@ TEST_F(PrecedenceRegressionTest, TopLevelValuesKeepsOwnOrderBy) {
 TEST_F(PrecedenceRegressionTest, ParenthesizedNonQueryRejected) {
     EXPECT_EQ(parse("(1 + 2)"), nullptr);
 }
+
+// ---------------------------------------------------------------------------
+// GUARDRAIL MATRIX: VALUES as a query primary / set-op operand, and set-op
+// keyword casing. Every prior pass fixed ONE adjacent cell of these two
+// neighborhoods (VALUES on the RHS, then parenthesized, then bare-LHS, then
+// inside parens; UNION casing) - a recurring "fix one, miss the neighbor"
+// pattern. This table pins the WHOLE matrix so a future change that drops any
+// single cell fails loudly here instead of surviving to the next audit.
+// ---------------------------------------------------------------------------
+
+namespace {
+// A parsed statement's direct child count.
+int direct_children(const ASTNode* n) {
+    int c = 0;
+    for (const ASTNode* k = n ? n->first_child : nullptr; k; k = k->next_sibling) ++c;
+    return c;
+}
+}  // namespace
+
+// VALUES is a query primary and a legal set-op operand in EVERY position, on
+// either side, parenthesized or bare, and nests. None of these may silently drop
+// an operator or an arm (the recurring VALUES regression class).
+TEST_F(PrecedenceRegressionTest, ValuesSetOpOperandMatrix) {
+    struct Case { const char* sql; NodeType root; int min_children; };
+    const Case cases[] = {
+        // standalone (with / without trailing clauses)
+        {"VALUES (1),(2)",                          NodeType::ValuesStmt,    1},
+        {"VALUES (1),(2) ORDER BY 1",               NodeType::ValuesStmt,    2},
+        {"VALUES (1) LIMIT 5",                      NodeType::ValuesStmt,    2},
+        // VALUES as LEFT operand, all three ops (+ ALL)
+        {"VALUES (1) UNION SELECT 2",               NodeType::UnionStmt,     2},
+        {"VALUES (1) INTERSECT SELECT 2",           NodeType::IntersectStmt, 2},
+        {"VALUES (1) EXCEPT SELECT 2",              NodeType::ExceptStmt,    2},
+        {"VALUES (1) UNION ALL SELECT 2",           NodeType::UnionStmt,     2},
+        // VALUES as RIGHT operand
+        {"SELECT 1 UNION VALUES (2)",               NodeType::UnionStmt,     2},
+        {"SELECT 1 INTERSECT VALUES (2)",           NodeType::IntersectStmt, 2},
+        {"SELECT 1 EXCEPT VALUES (2)",              NodeType::ExceptStmt,    2},
+        // parenthesized operands, either side / both
+        {"(VALUES (1)) UNION SELECT 2",             NodeType::UnionStmt,     2},
+        {"SELECT 1 UNION (VALUES (2))",             NodeType::UnionStmt,     2},
+        {"(VALUES (1)) UNION (VALUES (2))",         NodeType::UnionStmt,     2},
+        // both operands bare VALUES
+        {"VALUES (1) UNION VALUES (2)",             NodeType::UnionStmt,     2},
+        // trailing ORDER BY / LIMIT binds to the whole set op (3rd child)
+        {"VALUES (1) UNION SELECT 2 ORDER BY 1",    NodeType::UnionStmt,     3},
+        {"SELECT 1 UNION VALUES (2) ORDER BY 1",    NodeType::UnionStmt,     3},
+        {"VALUES (1) UNION SELECT 2 LIMIT 3",       NodeType::UnionStmt,     3},
+        // precedence: a VALUES INTERSECT arm binds tighter than UNION
+        {"SELECT 1 UNION VALUES (2) INTERSECT SELECT 3", NodeType::UnionStmt, 2},
+        {"VALUES (1) INTERSECT SELECT 2 UNION SELECT 3", NodeType::UnionStmt, 2},
+        // chains with VALUES at either / both ends
+        {"VALUES (1) UNION SELECT 2 UNION VALUES (3)",   NodeType::UnionStmt, 2},
+        {"SELECT 1 UNION SELECT 2 UNION VALUES (3)",     NodeType::UnionStmt, 2},
+        // a parenthesized query whose body is itself a set op starting with VALUES
+        {"(VALUES (1) UNION SELECT 2)",             NodeType::UnionStmt,     2},
+        {"(VALUES (1) UNION SELECT 2) UNION SELECT 3",   NodeType::UnionStmt, 2},
+        {"SELECT 1 UNION (VALUES (2) UNION SELECT 3)",   NodeType::UnionStmt, 2},
+        {"(VALUES (1) UNION SELECT 2) ORDER BY 1",  NodeType::UnionStmt,     3},
+        {"(VALUES (1) UNION SELECT 2 ORDER BY 1)",  NodeType::UnionStmt,     3},
+        {"VALUES (1) UNION (VALUES (2) INTERSECT SELECT 3)", NodeType::UnionStmt, 2},
+        // VALUES as a derived table stays a SELECT
+        {"SELECT * FROM (VALUES (1),(2)) t",        NodeType::SelectStmt,    1},
+    };
+    for (const Case& c : cases) {
+        ASTNode* root = parse(c.sql);
+        ASSERT_NE(root, nullptr) << "dropped/failed: " << c.sql;
+        EXPECT_EQ(root->node_type, c.root) << c.sql;
+        EXPECT_GE(direct_children(root), c.min_children)
+            << c.sql << " -> an operator or arm was dropped";
+    }
+}
+
+// Set-operation keywords are case-insensitive in EVERY casing (UPPER / lower /
+// MiXeD), with and without ALL. A mixed-case keyword must fold identically, not
+// be dropped (the mixed-case regression class).
+TEST_F(PrecedenceRegressionTest, SetOpKeywordCasingMatrix) {
+    struct Case { const char* kw; NodeType root; };
+    const Case cases[] = {
+        {"UNION", NodeType::UnionStmt},     {"union", NodeType::UnionStmt},     {"UnIoN", NodeType::UnionStmt},
+        {"INTERSECT", NodeType::IntersectStmt}, {"intersect", NodeType::IntersectStmt}, {"InTeRsEcT", NodeType::IntersectStmt},
+        {"EXCEPT", NodeType::ExceptStmt},   {"except", NodeType::ExceptStmt},   {"ExCePt", NodeType::ExceptStmt},
+    };
+    for (const Case& c : cases) {
+        {
+            const std::string sql = std::string("SELECT 1 ") + c.kw + " SELECT 2";
+            ASTNode* root = parse(sql);
+            ASSERT_NE(root, nullptr) << sql;
+            EXPECT_EQ(root->node_type, c.root) << sql;
+            EXPECT_EQ(direct_children(root), 2) << sql << " -> arm dropped";
+        }
+        {
+            const std::string sql = std::string("SELECT 1 ") + c.kw + " ALL SELECT 2";
+            ASTNode* root = parse(sql);
+            ASSERT_NE(root, nullptr) << sql;
+            EXPECT_EQ(root->node_type, c.root) << sql;
+        }
+    }
+}
