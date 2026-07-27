@@ -326,3 +326,49 @@ TEST_F(PrecedenceRegressionTest, LoneParenthesizedQueryUnwraps) {
     ASSERT_NE(root, nullptr);
     EXPECT_EQ(root->node_type, NodeType::SelectStmt);
 }
+
+// ---- Parenthesized VALUES / non-query operands -----------------------------
+// A parenthesized query block may be a VALUES list, not only a SELECT. Previously
+// parse_parenthesized_query fell through to parse_select_stmt, which consumed the
+// VALUES keyword as if it were SELECT and silently transposed the rows into a
+// one-row select list.
+
+// `(VALUES ...)` is a VALUES statement, identical to the unparenthesized form.
+TEST_F(PrecedenceRegressionTest, ParenthesizedValuesIsValues) {
+    auto* root = parse("(VALUES (2), (3))");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::ValuesStmt);
+    // Two rows survive (the mis-parse produced a single 2-column SELECT list).
+    ASTNode* rows = root->first_child;
+    ASSERT_NE(rows, nullptr);
+    EXPECT_EQ(rows->child_count, 2u);
+}
+
+// A VALUES arm of a set operation is kept, whether parenthesized or bare.
+TEST_F(PrecedenceRegressionTest, SetOpValuesOperandKept) {
+    {
+        auto* root = parse("(SELECT 1) UNION (VALUES (2), (3))");
+        ASSERT_NE(root, nullptr);
+        EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+        auto* right = root->first_child ? root->first_child->next_sibling : nullptr;
+        ASSERT_NE(right, nullptr);
+        EXPECT_EQ(right->node_type, NodeType::ValuesStmt);
+    }
+    {
+        // Bare VALUES operand: previously the whole `UNION VALUES (2)` arm was
+        // silently dropped and the statement read as a lone SELECT.
+        auto* root = parse("SELECT 1 UNION VALUES (2)");
+        ASSERT_NE(root, nullptr);
+        EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+        auto* right = root->first_child ? root->first_child->next_sibling : nullptr;
+        ASSERT_NE(right, nullptr);
+        EXPECT_EQ(right->node_type, NodeType::ValuesStmt);
+    }
+}
+
+// A leading `(` that does not begin a query block (e.g. a parenthesized scalar
+// expression) is rejected, not silently mis-parsed. `(1 + 2)` previously became
+// `SELECT + 2` (the `1` consumed as if it were the SELECT keyword).
+TEST_F(PrecedenceRegressionTest, ParenthesizedNonQueryRejected) {
+    EXPECT_EQ(parse("(1 + 2)"), nullptr);
+}

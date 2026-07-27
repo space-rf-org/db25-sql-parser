@@ -500,6 +500,13 @@ ast::ASTNode* Parser::parse_parenthesized_query() {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::WITH) {
         inner = parse_with_statement();
+    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+               current_token_->keyword_id == db25::Keyword::VALUES) {
+        // `( VALUES (..), (..) )` is a query block too. Without this, VALUES fell
+        // to the SELECT path below and parse_select_stmt consumed the `VALUES`
+        // keyword as if it were `SELECT`, silently transposing the rows into a
+        // one-row select list.
+        inner = parse_values_stmt();
     } else if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
                current_token_->value == "(") {
         // Nested parenthesized query expression: `((SELECT 1) UNION (SELECT 2))`.
@@ -507,10 +514,18 @@ ast::ASTNode* Parser::parse_parenthesized_query() {
         if (ast::ASTNode* nested = parse_parenthesized_query()) {
             inner = fold_set_operations(nested);
         }
-    } else {
+    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+               current_token_->keyword_id == db25::Keyword::SELECT) {
         // A leading SELECT parses fully here (set-op fold + trailing ORDER BY /
         // LIMIT) because in_setop_rhs_ is cleared above.
         inner = parse_select_stmt();
+    } else {
+        // Not a query block. parse_select_stmt() would blindly consume the first
+        // token as if it were SELECT (e.g. `(1 + 2)` -> `SELECT + 2`), a silent
+        // mis-parse; reject instead.
+        error("expected a query (SELECT, VALUES, WITH, or a parenthesized query) "
+              "after '('");
+        return nullptr;
     }
 
     in_setop_rhs_ = saved_rhs;
@@ -553,6 +568,14 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
             auto* branch = parse_select_stmt();
             in_setop_rhs_ = false;
             return branch;
+        }
+        // A bare VALUES arm: `SELECT 1 UNION VALUES (2)`. VALUES has no set-op
+        // tail of its own, so it is parsed as a complete operand. Without this
+        // the fold loop saw a non-`(`/SELECT operand, stopped, and silently
+        // dropped the operator and the whole VALUES arm.
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+            (current_token_->keyword_id == db25::Keyword::VALUES)) {
+            return parse_values_stmt();
         }
         return nullptr;
     };
