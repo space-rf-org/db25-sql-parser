@@ -233,9 +233,17 @@ protected:
     // derived table, expression subquery, CREATE ... AS - so VALUES handling and
     // set-op folding are identical everywhere and no site can silently omit a form.
     [[nodiscard]] ast::ASTNode* parse_query_body();
-    // Whether the current token begins a query block (SELECT / VALUES / WITH):
-    // distinguishes a subquery from a grouped expression in expression context.
+    // Whether the current token begins a query block: a SELECT / VALUES / WITH
+    // keyword, OR a '(' that (after any number of nested '(') introduces one of
+    // those - so `((SELECT 1) UNION (SELECT 2))` is recognized as a subquery, not
+    // a grouped expression. Distinguishes a subquery from a grouped expression in
+    // expression context and a derived table from a join group in FROM.
     [[nodiscard]] bool at_query_block_start() const;
+    // Starting at token index `from`, skip consecutive '(' and report whether the
+    // first non-'(' token begins a query (SELECT / VALUES / WITH). Lets the FROM /
+    // scalar / IN gates recognize a parenthesized query body that starts with '('
+    // (a set operation over parenthesized branches) rather than a keyword.
+    [[nodiscard]] bool paren_group_starts_query(std::size_t from) const;
     // Fold a set-operation tail (UNION/INTERSECT/EXCEPT/MINUS, two precedence
     // levels, left-associative) onto an already-parsed first operand, then bind a
     // trailing ORDER BY / LIMIT to the whole result. Returns the folded node (the
