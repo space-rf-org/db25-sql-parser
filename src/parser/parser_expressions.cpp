@@ -202,17 +202,20 @@ ast::ASTNode* Parser::parse_primary_expression() {
         parenthesis_depth_++;  // Track opening parenthesis
         advance(); // consume '('
         
-        // Check if it's a SELECT subquery
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-            (current_token_->keyword_id == db25::Keyword::SELECT)) {
+        // A parenthesized subquery in expression / IN / EXISTS context may be any
+        // query block that begins with a keyword: SELECT, VALUES, or WITH (a bare
+        // `(` here stays a grouped expression / row constructor, unchanged). A
+        // leading VALUES was previously mis-parsed as a `VALUES(...)` function
+        // call, and `(VALUES (1) UNION SELECT 2)` left the `UNION ...` unconsumed.
+        if (at_query_block_start()) {
             // It's a subquery
             auto* subquery_node = arena_.allocate<ast::ASTNode>();
             new (subquery_node) ast::ASTNode(ast::NodeType::Subquery);
             subquery_node->node_id = next_node_id_++;
-            
+
             push_context(ParseContext::SUBQUERY);
-            // Parse the SELECT statement
-            auto* select_stmt = parse_select_stmt();
+            // Parse the query body (SELECT / VALUES / WITH), folding any set-op tail.
+            auto* select_stmt = parse_query_body();
             pop_context();
             if (select_stmt) {
                 select_stmt->parent = subquery_node;
@@ -706,9 +709,16 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
 
                 // Look for opening paren
                 if (current_token_ && current_token_->value == "(") {
-                    // Peek ahead to see if it's a SELECT
+                    // Peek ahead: a query-block keyword (SELECT / VALUES / WITH)
+                    // after `(` means `IN (subquery)`; anything else is an
+                    // `IN (expr, expr, ...)` value list. A leading VALUES was
+                    // previously treated as a list and mis-parsed as a `VALUES(..)`
+                    // function call (and `IN (VALUES (1) UNION SELECT 2)` dropped
+                    // the set-op tail).
                     if (peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword &&
-                        peek_token_->keyword_id == db25::Keyword::SELECT) {
+                        (peek_token_->keyword_id == db25::Keyword::SELECT ||
+                         peek_token_->keyword_id == db25::Keyword::VALUES ||
+                         peek_token_->keyword_id == db25::Keyword::WITH)) {
                         // It's a subquery - parse it as a primary expression
                         in_operand = parse_primary_expression();
                     } else {

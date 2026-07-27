@@ -224,6 +224,18 @@ protected:
     // inner query node. Used for a parenthesized set-operation operand, including
     // a LEADING one at statement level: `(SELECT 1) UNION (SELECT 2)`.
     [[nodiscard]] ast::ASTNode* parse_parenthesized_query();
+    // Parse a query-expression body at the current position (a SELECT, a VALUES
+    // list, a WITH ... query, or a nested parenthesized query block) and fold any
+    // set-operation tail. Returns the query node, or null if the current token
+    // does not begin a query (the caller decides whether that is a syntax error;
+    // this never emits a diagnostic itself). THIS is the single dispatch every
+    // query-block site shares - statement body, parenthesized query, CTE body,
+    // derived table, expression subquery, CREATE ... AS - so VALUES handling and
+    // set-op folding are identical everywhere and no site can silently omit a form.
+    [[nodiscard]] ast::ASTNode* parse_query_body();
+    // Whether the current token begins a query block (SELECT / VALUES / WITH):
+    // distinguishes a subquery from a grouped expression in expression context.
+    [[nodiscard]] bool at_query_block_start() const;
     // Fold a set-operation tail (UNION/INTERSECT/EXCEPT/MINUS, two precedence
     // levels, left-associative) onto an already-parsed first operand, then bind a
     // trailing ORDER BY / LIMIT to the whole result. Returns the folded node (the

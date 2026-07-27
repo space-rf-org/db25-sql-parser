@@ -615,3 +615,56 @@ TEST_F(PrecedenceRegressionTest, SetOpKeywordCasingMatrix) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// GUARDRAIL MATRIX: VALUES as a query BODY in every query-block context. VALUES
+// is a query primary, so it must parse anywhere a SELECT query body can - a FROM
+// derived table, a CTE body, a scalar / IN / EXISTS subquery, and CREATE VIEW AS
+// - both bare and as a set-operation. These sites historically each had their
+// own query-body dispatch and several accepted only SELECT, silently dropping or
+// MIS-PARSING a VALUES body (e.g. `SELECT (VALUES (1))` -> a `VALUES(1)` function
+// call; `x IN (VALUES (1),(2))` -> a 2-item value list). All sites now route
+// through the shared parse_query_body(); this table pins every context so a
+// future site cannot regress to a SELECT-only dispatch.
+// ---------------------------------------------------------------------------
+namespace {
+bool subtree_has(const ASTNode* n, NodeType t) {
+    if (!n) return false;
+    if (n->node_type == t) return true;
+    for (const ASTNode* c = n->first_child; c; c = c->next_sibling)
+        if (subtree_has(c, t)) return true;
+    return false;
+}
+}  // namespace
+
+TEST_F(PrecedenceRegressionTest, ValuesQueryBodyEveryContextMatrix) {
+    // Each case: the SQL, and the node type its query body must contain. The
+    // *_setop variant must fold to a UnionStmt (not drop the arm).
+    struct Case { const char* sql; NodeType must_contain; };
+    const Case cases[] = {
+        // FROM derived table
+        {"SELECT * FROM (VALUES (1),(2)) t",                         NodeType::ValuesStmt},
+        {"SELECT * FROM (VALUES (1) UNION SELECT 2) t",             NodeType::UnionStmt},
+        // CTE body (even the bare form was rejected before)
+        {"WITH t AS (VALUES (1),(2)) SELECT * FROM t",              NodeType::ValuesStmt},
+        {"WITH t AS (VALUES (1) UNION SELECT 2) SELECT * FROM t",   NodeType::UnionStmt},
+        // scalar subquery in the SELECT list
+        {"SELECT (VALUES (1))",                                     NodeType::ValuesStmt},
+        {"SELECT (VALUES (1) UNION SELECT 2)",                      NodeType::UnionStmt},
+        // IN subquery (was mis-parsed as a value list)
+        {"SELECT * FROM t WHERE x IN (VALUES (1),(2))",             NodeType::ValuesStmt},
+        {"SELECT * FROM t WHERE x IN (VALUES (1) UNION SELECT 2)",  NodeType::UnionStmt},
+        // EXISTS subquery
+        {"SELECT * FROM t WHERE EXISTS (VALUES (1))",               NodeType::ValuesStmt},
+        // CREATE VIEW AS (bare form was silently dropped)
+        {"CREATE VIEW v AS VALUES (1),(2)",                        NodeType::ValuesStmt},
+        {"CREATE VIEW v AS VALUES (1) UNION SELECT 2",             NodeType::UnionStmt},
+    };
+    for (const Case& c : cases) {
+        ASTNode* root = parse(c.sql);
+        ASSERT_NE(root, nullptr) << "dropped/failed to parse: " << c.sql;
+        EXPECT_TRUE(subtree_has(root, c.must_contain))
+            << c.sql << " -> query body missing/mis-parsed (expected node "
+            << static_cast<int>(c.must_contain) << ")";
+    }
+}
