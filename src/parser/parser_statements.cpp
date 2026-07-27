@@ -177,7 +177,17 @@ ast::ASTNode* Parser::parse_explain_stmt() {
 ast::ASTNode* Parser::parse_values_stmt() {
     DepthGuard guard(this);
     if (!guard.is_valid()) return nullptr;
-    
+
+    // If this VALUES is the right-hand operand of an enclosing set operation
+    // (`SELECT 1 UNION VALUES (2) ORDER BY 1`), it must NOT swallow a trailing
+    // ORDER BY / LIMIT: those bind to the WHOLE set operation and are parsed
+    // once, after folding (see fold_set_operations / attach_trailing_order_limit),
+    // exactly as the bare-SELECT arm handles it. Capture and clear the flag so
+    // any nested parse behaves normally; a parenthesized `(VALUES ...)` operand
+    // re-enters with the flag already cleared and so keeps its own ORDER BY.
+    const bool is_setop_rhs = in_setop_rhs_;
+    in_setop_rhs_ = false;
+
     auto* values_node = arena_.allocate<ast::ASTNode>();
     new (values_node) ast::ASTNode(ast::NodeType::ValuesStmt);
     values_node->node_id = next_node_id_++;
@@ -259,8 +269,9 @@ ast::ASTNode* Parser::parse_values_stmt() {
     values_node->first_child = values_clause;
     values_node->child_count = 1;
     
-    // Parse optional ORDER BY
-    if (current_token_ && current_token_->keyword_id == db25::Keyword::ORDER) {
+    // Parse optional ORDER BY (unless this VALUES is a set-op RHS operand, in
+    // which case a trailing ORDER BY belongs to the whole set operation).
+    if (!is_setop_rhs && current_token_ && current_token_->keyword_id == db25::Keyword::ORDER) {
         advance(); // consume ORDER
         if (current_token_ && current_token_->keyword_id == db25::Keyword::BY) {
             advance(); // consume BY
@@ -272,9 +283,9 @@ ast::ASTNode* Parser::parse_values_stmt() {
             }
         }
     }
-    
-    // Parse optional LIMIT
-    if (current_token_ && current_token_->keyword_id == db25::Keyword::LIMIT) {
+
+    // Parse optional LIMIT (same set-op RHS caveat as ORDER BY above).
+    if (!is_setop_rhs && current_token_ && current_token_->keyword_id == db25::Keyword::LIMIT) {
         advance(); // consume LIMIT
         auto* limit = parse_limit_clause();
         if (limit) {

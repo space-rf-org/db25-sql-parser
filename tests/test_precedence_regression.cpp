@@ -400,6 +400,57 @@ TEST_F(PrecedenceRegressionTest, SetOpValuesOperandKept) {
     }
 }
 
+// A trailing ORDER BY / LIMIT after a BARE VALUES set-op arm binds to the WHOLE
+// set operation, not to the VALUES operand. Regression: parse_values_stmt eats a
+// trailing ORDER BY/LIMIT unconditionally, so `SELECT 1 UNION VALUES (2) ORDER BY 1`
+// nested the OrderByClause under the VALUES arm (UNION had only 2 children) --
+// unlike the SELECT arm and the parenthesized-VALUES arm, which both attach it to
+// the UNION. Now the bare-VALUES operand is parsed in setop-rhs mode and does not
+// swallow the clause.
+TEST_F(PrecedenceRegressionTest, SetOpBareValuesTrailingOrderByBindsToWhole) {
+    auto* root = parse("SELECT 1 UNION VALUES (2) ORDER BY 1");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    // ORDER BY is a direct child of the UNION, not of the VALUES arm.
+    ASTNode* order_by = nullptr;
+    ASTNode* values = nullptr;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::OrderByClause) order_by = c;
+        if (c->node_type == NodeType::ValuesStmt) values = c;
+    }
+    ASSERT_NE(order_by, nullptr) << "ORDER BY must attach to the UNION node";
+    ASSERT_NE(values, nullptr);
+    EXPECT_EQ(find(values, NodeType::OrderByClause), nullptr)
+        << "the VALUES arm must not own the trailing ORDER BY";
+}
+
+// Same for LIMIT after a bare VALUES set-op arm.
+TEST_F(PrecedenceRegressionTest, SetOpBareValuesTrailingLimitBindsToWhole) {
+    auto* root = parse("SELECT 1 UNION VALUES (2) LIMIT 5");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    ASTNode* limit = nullptr;
+    ASTNode* values = nullptr;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::LimitClause) limit = c;
+        if (c->node_type == NodeType::ValuesStmt) values = c;
+    }
+    ASSERT_NE(limit, nullptr) << "LIMIT must attach to the UNION node";
+    ASSERT_NE(values, nullptr);
+    EXPECT_EQ(find(values, NodeType::LimitClause), nullptr)
+        << "the VALUES arm must not own the trailing LIMIT";
+}
+
+// Control: a TOP-LEVEL VALUES (not a set-op operand) still keeps its own ORDER BY
+// -- the set-op-rhs suppression must not leak to the standalone form.
+TEST_F(PrecedenceRegressionTest, TopLevelValuesKeepsOwnOrderBy) {
+    auto* root = parse("VALUES (3), (1), (2) ORDER BY 1");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::ValuesStmt);
+    EXPECT_NE(find(root, NodeType::OrderByClause), nullptr)
+        << "a standalone VALUES must keep its own ORDER BY";
+}
+
 // A leading `(` that does not begin a query block (e.g. a parenthesized scalar
 // expression) is rejected, not silently mis-parsed. `(1 + 2)` previously became
 // `SELECT + 2` (the `1` consumed as if it were the SELECT keyword).
