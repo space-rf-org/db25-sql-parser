@@ -26,7 +26,40 @@ protected:
         }
         return result.value();
     }
+
+    // First node in the tree with the given DataType (pre-order).
+    static ASTNode* find_type(ASTNode* n, DataType dt) {
+        if (!n) return nullptr;
+        if (n->data_type == dt) return n;
+        for (auto* c = n->first_child; c; c = c->next_sibling) {
+            if (auto* h = find_type(c, dt)) return h;
+        }
+        return nullptr;
+    }
 };
+
+// DECIMAL/NUMERIC precision AND scale must both survive parsing. They are packed
+// into the 16-bit semantic_flags as precision (low byte) | scale (high byte).
+// Regression: scale was written as `scale << 16` into a uint16_t and truncated
+// to 0, so DECIMAL(10,2) silently recorded scale=0.
+TEST_F(DDLTest, DecimalPrecisionAndScaleRetained) {
+    auto* ast = parse("CREATE TABLE t (x DECIMAL(10,2))");
+    ASSERT_NE(ast, nullptr);
+    auto* type = find_type(ast, DataType::Decimal);
+    ASSERT_NE(type, nullptr) << "DECIMAL type node not found";
+    EXPECT_EQ(type->semantic_flags & 0xFF, 10u) << "precision (low byte)";
+    EXPECT_EQ((type->semantic_flags >> 8) & 0xFF, 2u) << "scale (high byte)";
+}
+
+// NUMERIC with precision only: scale defaults to 0, precision still retained.
+TEST_F(DDLTest, DecimalPrecisionOnly) {
+    auto* ast = parse("CREATE TABLE t (x NUMERIC(18))");
+    ASSERT_NE(ast, nullptr);
+    auto* type = find_type(ast, DataType::Decimal);
+    ASSERT_NE(type, nullptr);
+    EXPECT_EQ(type->semantic_flags & 0xFF, 18u);
+    EXPECT_EQ((type->semantic_flags >> 8) & 0xFF, 0u);
+}
 
 // ============================================================================
 // CREATE INDEX
