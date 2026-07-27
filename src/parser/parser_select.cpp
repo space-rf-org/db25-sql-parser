@@ -425,45 +425,49 @@ ast::ASTNode* Parser::parse_select_stmt() {
         }
     }
     
-    // Parse ORDER BY clause
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-        (current_token_->keyword_id == db25::Keyword::ORDER)) {
-        advance(); // consume ORDER
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::BY) {
-            advance(); // consume BY
-            
-            auto* order_by = parse_order_by_clause();
-            if (order_by) {
-                order_by->parent = select_node;
-                // Add to the end of child list
-                auto* last_child = select_node->first_child;
-                while (last_child->next_sibling) {
-                    last_child = last_child->next_sibling;
-                }
-                last_child->next_sibling = order_by;
-                select_node->child_count++;
-            }
-        }
-    }
-    
-    // Parse LIMIT clause
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-        (current_token_->keyword_id == db25::Keyword::LIMIT)) {
-        advance(); // consume LIMIT
-        
-        auto* limit_clause = parse_limit_clause();
-        if (limit_clause) {
-            limit_clause->parent = select_node;
-            // Add to the end of child list
-            auto* last_child = select_node->first_child;
+    // Parse a trailing ORDER BY and/or LIMIT and append them to `target`. Shared
+    // by the plain-SELECT path (here) and the set-operation path below: a
+    // trailing ORDER BY / LIMIT after `A UNION B` applies to the WHOLE result, so
+    // it must attach to the set-op node, not to B.
+    auto attach_order_by_limit = [&](ast::ASTNode* target) {
+        const auto append = [&](ast::ASTNode* clause) {
+            clause->parent = target;
+            auto* last_child = target->first_child;
             while (last_child->next_sibling) {
                 last_child = last_child->next_sibling;
             }
-            last_child->next_sibling = limit_clause;
-            select_node->child_count++;
+            last_child->next_sibling = clause;
+            target->child_count++;
+        };
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+            (current_token_->keyword_id == db25::Keyword::ORDER)) {
+            advance(); // consume ORDER
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::BY) {
+                advance(); // consume BY
+                if (auto* order_by = parse_order_by_clause()) {
+                    append(order_by);
+                }
+            }
         }
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+            (current_token_->keyword_id == db25::Keyword::LIMIT)) {
+            advance(); // consume LIMIT
+            if (auto* limit_clause = parse_limit_clause()) {
+                append(limit_clause);
+            }
+        }
+    };
+
+    // A bare set-operation operand (the right branch, and the left before folding)
+    // must NOT swallow a trailing ORDER BY / LIMIT: those bind to the whole set
+    // operation and are parsed once, after folding, below. `SELECT 1 UNION SELECT
+    // 2 ORDER BY 1` previously let the right branch eat `ORDER BY 1`, then failed
+    // validation. A parenthesized operand keeps its own ORDER BY (it re-enters
+    // this function outside setop-rhs mode), matching SQL scoping.
+    if (!is_setop_rhs) {
+        attach_order_by_limit(select_node);
     }
-    
+
     // Set operations (UNION / INTERSECT / EXCEPT / MINUS) fold LEFT-
     // associatively: `A op B op C` parses as `(A op B) op C`. If this invocation
     // is itself the right-hand branch of an enclosing set operation, return the
@@ -487,8 +491,32 @@ ast::ASTNode* Parser::parse_select_stmt() {
     // in_setop_rhs_ guard so the nested call returns its branch without folding
     // its own set-op tail (this loop owns the folding).
 
-    // Parse one bare operand: a SELECT with no set-op tail of its own.
+    // Parse one operand: a bare SELECT with no set-op tail of its own, OR a
+    // parenthesized query block `( <query> )` (which may itself be a set
+    // operation, and keeps its own ORDER BY / LIMIT). `SELECT 1 UNION (SELECT 2)`
+    // previously dropped the parenthesized branch entirely.
     auto parse_setop_operand = [&]() -> ast::ASTNode* {
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
+            current_token_->value == "(") {
+            parenthesis_depth_++;
+            advance(); // consume '('
+            const bool saved_rhs = in_setop_rhs_;
+            in_setop_rhs_ = false;  // inside the parens it is a complete query block
+            ast::ASTNode* inner =
+                (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                 current_token_->keyword_id == db25::Keyword::WITH)
+                    ? parse_with_statement()
+                    : parse_select_stmt();
+            in_setop_rhs_ = saved_rhs;
+            if (current_token_ && current_token_->value == ")") {
+                if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                advance(); // consume ')'
+            } else {
+                error("expected ')' after parenthesized set-operation operand");
+                return nullptr;
+            }
+            return inner;
+        }
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
             (current_token_->keyword_id == db25::Keyword::SELECT)) {
             in_setop_rhs_ = true;
@@ -577,7 +605,13 @@ ast::ASTNode* Parser::parse_select_stmt() {
         left = make_setop_node(keyword, set_op_type, left, right, all);
     }
     select_node = left;
-    
+
+    // A trailing ORDER BY / LIMIT after the whole set operation binds to the
+    // combined result, so it attaches to the (folded) set-op node here. For a
+    // plain SELECT (no operator folded) the clauses were already consumed above,
+    // so this is a no-op.
+    attach_order_by_limit(select_node);
+
     // Consume any trailing semicolon
     if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
         current_token_->value == ";") {
