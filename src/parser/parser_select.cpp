@@ -585,7 +585,14 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
         // dropped the operator and the whole VALUES arm.
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
             (current_token_->keyword_id == db25::Keyword::VALUES)) {
-            return parse_values_stmt();
+            // Mark the operand as a set-op RHS so parse_values_stmt does not eat a
+            // trailing ORDER BY / LIMIT that belongs to the whole set operation
+            // (mirrors the SELECT arm above). Without this the clause was nested
+            // under the VALUES arm instead of the combined node.
+            in_setop_rhs_ = true;
+            auto* branch = parse_values_stmt();
+            in_setop_rhs_ = false;
+            return branch;
         }
         return nullptr;
     };
