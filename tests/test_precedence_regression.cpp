@@ -211,3 +211,54 @@ TEST_F(PrecedenceRegressionTest, GroupByMissingItemNoCrash) {
     // No GroupByClause child should have been attached (the item failed to parse).
     EXPECT_EQ(find(ast, NodeType::GroupByClause), nullptr);
 }
+
+// ---- Set-operation operand / trailing-clause fixes ------------------------
+
+// A parenthesized right operand of a set operation must be kept, not dropped:
+// `SELECT 1 UNION (SELECT 2)` is a UNION over two SELECT branches.
+TEST_F(PrecedenceRegressionTest, SetOpParenthesizedRightOperand) {
+    auto* root = parse("SELECT 1 UNION (SELECT 2)");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    int selects = 0;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::SelectStmt) ++selects;
+    }
+    EXPECT_EQ(selects, 2) << "both UNION branches must survive";
+}
+
+// A trailing ORDER BY after a set operation binds to the whole result: it is a
+// direct child of the set-op node, not swallowed by the right branch (which
+// previously made `... UNION SELECT 2 ORDER BY 1` fail to parse).
+TEST_F(PrecedenceRegressionTest, SetOpTrailingOrderByBindsToWhole) {
+    auto* root = parse("SELECT a FROM t UNION SELECT a FROM u ORDER BY 1");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    ASTNode* order_by = nullptr;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::OrderByClause) order_by = c;
+    }
+    ASSERT_NE(order_by, nullptr) << "ORDER BY must attach to the UNION node";
+}
+
+TEST_F(PrecedenceRegressionTest, SetOpTrailingOrderByAndLimitBindToWhole) {
+    auto* root = parse("SELECT a FROM t UNION SELECT a FROM u ORDER BY 1 LIMIT 5");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    bool has_order = false, has_limit = false;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::OrderByClause) has_order = true;
+        if (c->node_type == NodeType::LimitClause) has_limit = true;
+    }
+    EXPECT_TRUE(has_order);
+    EXPECT_TRUE(has_limit);
+}
+
+// Regression guard: a plain SELECT still attaches its own ORDER BY / LIMIT.
+TEST_F(PrecedenceRegressionTest, PlainSelectStillAttachesOrderByLimit) {
+    auto* root = parse("SELECT a FROM t ORDER BY a LIMIT 3");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::SelectStmt);
+    EXPECT_NE(find(root, NodeType::OrderByClause), nullptr);
+    EXPECT_NE(find(root, NodeType::LimitClause), nullptr);
+}
