@@ -482,13 +482,43 @@ void Parser::attach_trailing_order_limit(ast::ASTNode* target) {
 // query node. The inner block is a complete query (may itself be a set operation,
 // or another parenthesized block) and keeps its own ORDER BY / LIMIT. Guarded
 // against deep `((((...))))` nesting.
-bool Parser::at_query_block_start() const {
-    if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword) {
+bool Parser::paren_group_starts_query(std::size_t from) const {
+    if (tokenizer_ == nullptr) {
         return false;
     }
-    const auto k = current_token_->keyword_id;
+    const auto& tokens = tokenizer_->get_tokens();
+    std::size_t i = from;
+    // A query body may be wrapped in extra parentheses: `((SELECT 1) UNION ...)`.
+    while (i < tokens.size() &&
+           tokens[i].type == tokenizer::TokenType::Delimiter &&
+           tokens[i].value == "(") {
+        ++i;
+    }
+    if (i >= tokens.size() || tokens[i].type != tokenizer::TokenType::Keyword) {
+        return false;
+    }
+    const auto k = tokens[i].keyword_id;
     return k == db25::Keyword::SELECT || k == db25::Keyword::VALUES ||
            k == db25::Keyword::WITH;
+}
+
+bool Parser::at_query_block_start() const {
+    if (!current_token_) {
+        return false;
+    }
+    if (current_token_->type == tokenizer::TokenType::Keyword) {
+        const auto k = current_token_->keyword_id;
+        return k == db25::Keyword::SELECT || k == db25::Keyword::VALUES ||
+               k == db25::Keyword::WITH;
+    }
+    // A leading '(' that (past any nested parens) begins a query is a query block
+    // too: `((SELECT 1) UNION (SELECT 2))`. parse_query_body's '(' branch then
+    // parses it via parse_parenthesized_query and folds the set-op tail.
+    if (current_token_->type == tokenizer::TokenType::Delimiter &&
+        current_token_->value == "(" && tokenizer_ != nullptr) {
+        return paren_group_starts_query(tokenizer_->position());
+    }
+    return false;
 }
 
 ast::ASTNode* Parser::parse_query_body() {
@@ -1543,11 +1573,14 @@ ast::ASTNode* Parser::parse_table_reference() {
     // ( a JOIN b ON a.id = b.id ). Disambiguate on the following token.
     if (current_token_->type == tokenizer::TokenType::Delimiter &&
         current_token_->value == "(") {
+        // A derived table's body is a query: it starts with a SELECT / VALUES /
+        // WITH keyword, OR with a '(' that (past any nested parens) introduces
+        // one - `((SELECT 1) UNION (SELECT 2)) t`. Scan past the outer '(' (at
+        // position()) starting one token later. A parenthesized join group, by
+        // contrast, begins with an identifier or a '(' that wraps a table ref.
         const bool is_derived_table =
-            peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword &&
-            (peek_token_->keyword_id == db25::Keyword::SELECT ||
-             peek_token_->keyword_id == db25::Keyword::WITH ||
-             peek_token_->keyword_id == db25::Keyword::VALUES);
+            tokenizer_ != nullptr &&
+            paren_group_starts_query(tokenizer_->position() + 1);
         // A parenthesized join group begins with something that itself begins a
         // table reference: an identifier (table name) or a nested '('.
         const bool is_join_group =

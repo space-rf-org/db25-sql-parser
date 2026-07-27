@@ -668,3 +668,46 @@ TEST_F(PrecedenceRegressionTest, ValuesQueryBodyEveryContextMatrix) {
             << static_cast<int>(c.must_contain) << ")";
     }
 }
+
+// GUARDRAIL: a parenthesized query body that begins with '(' (a set operation
+// over parenthesized branches, `((SELECT 1) UNION (SELECT 2))`) is a valid query
+// / subquery wherever a keyword-led one is. The query-body DISPATCH was unified
+// earlier, but the ENTRY GATES that decide whether to call it (the FROM derived-
+// table vs join-group split, the scalar-subquery test, the IN peek) recognized
+// only a leading KEYWORD, so a leading '(' was rejected in FROM / scalar / IN /
+// EXISTS while it worked at statement / CTE / CREATE VIEW. This pins every
+// context so a leading-'(' query body cannot regress at any gate.
+TEST_F(PrecedenceRegressionTest, ParenLedQueryBodyEveryContextMatrix) {
+    const char* queries[] = {
+        "((SELECT 1) UNION (SELECT 2)) LIMIT 1",                       // statement
+        "WITH t AS ((SELECT 1) UNION (SELECT 2)) SELECT * FROM t",     // CTE body
+        "CREATE VIEW v AS (SELECT 1) UNION (SELECT 2)",               // view (control)
+        "SELECT * FROM ((SELECT 1) UNION (SELECT 2)) t",              // FROM derived
+        "SELECT ((SELECT 1) UNION (SELECT 2)) FROM z",                // scalar subquery
+        "SELECT * FROM z WHERE x IN ((SELECT 1) UNION (SELECT 2))",   // IN subquery
+        "SELECT * FROM z WHERE EXISTS ((SELECT 1) UNION (SELECT 2))", // EXISTS subquery
+    };
+    for (const char* sql : queries) {
+        ASTNode* root = parse(sql);
+        ASSERT_NE(root, nullptr) << "rejected a legal parenthesized query body: " << sql;
+        EXPECT_NE(find(root, NodeType::UnionStmt), nullptr)
+            << sql << " -> the set-op body was dropped / mis-parsed (no UnionStmt)";
+    }
+    // A parenthesized FROM JOIN GROUP must still NOT be taken as a derived table.
+    {
+        ASTNode* root = parse("SELECT * FROM (a JOIN b ON a.id = b.id)");
+        ASSERT_NE(root, nullptr);
+        EXPECT_EQ(find(root, NodeType::Subquery), nullptr)
+            << "a FROM join group must not be classified as a derived-table subquery";
+    }
+    // The double-paren derived table retains its column-alias list `(x)` (was
+    // silently dropped when it took the spurious join-group path).
+    {
+        ASTNode* root = parse("SELECT * FROM ((SELECT 1)) t(x)");
+        ASSERT_NE(root, nullptr);
+        EXPECT_NE(find(root, NodeType::Subquery), nullptr) << "((SELECT 1)) t(x) is a derived table";
+        // The `(x)` alias list is captured as a ColumnList somewhere in the tree.
+        EXPECT_NE(find(root, NodeType::ColumnList), nullptr)
+            << "the (x) column-alias list must be retained";
+    }
+}

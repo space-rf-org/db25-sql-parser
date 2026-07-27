@@ -709,16 +709,15 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
 
                 // Look for opening paren
                 if (current_token_ && current_token_->value == "(") {
-                    // Peek ahead: a query-block keyword (SELECT / VALUES / WITH)
-                    // after `(` means `IN (subquery)`; anything else is an
-                    // `IN (expr, expr, ...)` value list. A leading VALUES was
+                    // A query body after `(` means `IN (subquery)`; anything else
+                    // is an `IN (expr, expr, ...)` value list. The body starts with
+                    // a SELECT / VALUES / WITH keyword OR a nested `(` that
+                    // introduces one (`IN ((SELECT 1) UNION (SELECT 2))`), scanned
+                    // from one token past the current `(`. A leading VALUES was
                     // previously treated as a list and mis-parsed as a `VALUES(..)`
-                    // function call (and `IN (VALUES (1) UNION SELECT 2)` dropped
-                    // the set-op tail).
-                    if (peek_token_ && peek_token_->type == tokenizer::TokenType::Keyword &&
-                        (peek_token_->keyword_id == db25::Keyword::SELECT ||
-                         peek_token_->keyword_id == db25::Keyword::VALUES ||
-                         peek_token_->keyword_id == db25::Keyword::WITH)) {
+                    // function call; a leading `(` dropped the set-op tail.
+                    if (tokenizer_ != nullptr &&
+                        paren_group_starts_query(tokenizer_->position() + 1)) {
                         // It's a subquery - parse it as a primary expression
                         in_operand = parse_primary_expression();
                     } else {
