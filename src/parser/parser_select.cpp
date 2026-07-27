@@ -334,6 +334,16 @@ ast::ASTNode* Parser::parse_select_stmt() {
         if (current_token_->keyword_id == db25::Keyword::DISTINCT) {
             select_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::Distinct);
             advance(); // consume DISTINCT
+            // `DISTINCT ON (expr, ...)` (PostgreSQL) is not supported. Reject it
+            // instead of falling through to the select-list parser, which read
+            // `ON (a)` as a function call `ON(a)` occupying the first output slot
+            // and consumed the intended first column as its alias - silently
+            // dropping a projected column.
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                current_token_->keyword_id == db25::Keyword::ON) {
+                error("DISTINCT ON is not supported");
+                return nullptr;
+            }
         } else if (current_token_->keyword_id == db25::Keyword::ALL) {
             select_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::All);
             advance(); // consume ALL
