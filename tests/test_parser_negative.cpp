@@ -90,3 +90,17 @@ TEST(ParserNegativeTest, DeleteMissingFrom) {
 TEST(ParserNegativeTest, GarbageInput) {
     expect_parse_error("GARBAGE tokens here");
 }
+
+// `DISTINCT ON (...)` (PostgreSQL) is unsupported and must be rejected, not
+// silently mis-parsed: previously `ON (a)` was read as a function call `ON(a)`
+// that took the first output slot and swallowed the intended first column `a`
+// as its alias, dropping a projected column.
+TEST(ParserNegativeTest, DistinctOnUnsupported) {
+    expect_parse_error("SELECT DISTINCT ON (a) a, b FROM t");
+}
+
+// Plain DISTINCT (no ON) is unaffected and still parses.
+TEST(ParserNegativeTest, PlainDistinctStillParses) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT DISTINCT a, b FROM t").has_value());
+}
