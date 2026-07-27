@@ -383,7 +383,17 @@ ast::ASTNode* Parser::parse_statement() {
     } else if (keyword_id == db25::Keyword::EXPLAIN) {
         return parse_explain_stmt();
     } else if (keyword_id == db25::Keyword::VALUES) {
-        return parse_values_stmt();
+        // A top-level VALUES is a query primary and may be the LEFT operand of a
+        // set operation (`VALUES (1) UNION SELECT 2`), exactly like a leading
+        // SELECT or a leading `(`. Fold any set-op tail; without this the
+        // operator and the entire right arm were silently dropped, leaving a
+        // bare ValuesStmt for a legal set-op query. (A standalone VALUES has no
+        // set-op tail, so fold_set_operations returns it unchanged.)
+        ast::ASTNode* first = parse_values_stmt();
+        if (!first) {
+            return nullptr;
+        }
+        return fold_set_operations(first);
     } else if (keyword_id == db25::Keyword::SET) {
         return parse_set_stmt();
     } else if (current_token_ && (current_token_->value == "VACUUM" || current_token_->value == "vacuum")) {  // TODO: Add VACUUM to keywords

@@ -400,6 +400,65 @@ TEST_F(PrecedenceRegressionTest, SetOpValuesOperandKept) {
     }
 }
 
+// A bare top-level VALUES may be the LEFT operand of a set operation. Regression:
+// parse_statement dispatched a leading VALUES straight to parse_values_stmt with
+// NO set-op fold (unlike the SELECT and leading-'(' paths), so `VALUES (1) UNION
+// SELECT 2` silently dropped the operator and the entire right arm, leaving a
+// bare ValuesStmt. Now the top-level VALUES is folded like any other operand.
+TEST_F(PrecedenceRegressionTest, SetOpBareValuesLeftOperand) {
+    {
+        auto* root = parse("VALUES (1) UNION SELECT 2");
+        ASSERT_NE(root, nullptr);
+        EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+        EXPECT_EQ(root->child_count, 2u);  // both arms kept
+        auto* left = root->first_child;
+        auto* right = left ? left->next_sibling : nullptr;
+        ASSERT_NE(left, nullptr);
+        ASSERT_NE(right, nullptr);
+        EXPECT_EQ(left->node_type, NodeType::ValuesStmt);   // VALUES on the left
+        EXPECT_EQ(right->node_type, NodeType::SelectStmt);  // SELECT on the right
+    }
+    {
+        auto* root = parse("VALUES (1) INTERSECT SELECT 2");
+        ASSERT_NE(root, nullptr);
+        EXPECT_EQ(root->node_type, NodeType::IntersectStmt);
+        EXPECT_EQ(root->child_count, 2u);
+    }
+    {
+        auto* root = parse("VALUES (1) EXCEPT SELECT 2");
+        ASSERT_NE(root, nullptr);
+        EXPECT_EQ(root->node_type, NodeType::ExceptStmt);
+        EXPECT_EQ(root->child_count, 2u);
+    }
+}
+
+// A trailing ORDER BY after a `VALUES ... UNION ...` binds to the whole set
+// operation; the left VALUES operand does not swallow it.
+TEST_F(PrecedenceRegressionTest, SetOpBareValuesLeftOperandTrailingOrderBy) {
+    auto* root = parse("VALUES (1) UNION SELECT 2 ORDER BY 1");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    ASTNode* order_by = nullptr;
+    ASTNode* values = nullptr;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::OrderByClause) order_by = c;
+        if (c->node_type == NodeType::ValuesStmt) values = c;
+    }
+    ASSERT_NE(order_by, nullptr) << "ORDER BY must attach to the UNION node";
+    ASSERT_NE(values, nullptr);
+    EXPECT_EQ(find(values, NodeType::OrderByClause), nullptr)
+        << "the left VALUES operand must not own the trailing ORDER BY";
+}
+
+// Control: a standalone top-level VALUES with its own ORDER BY is unchanged (no
+// set-op tail, so the fold returns it as-is and it keeps its ORDER BY).
+TEST_F(PrecedenceRegressionTest, StandaloneValuesUnchangedByFold) {
+    auto* root = parse("VALUES (3), (1), (2) ORDER BY 1");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::ValuesStmt);
+    EXPECT_NE(find(root, NodeType::OrderByClause), nullptr);
+}
+
 // A trailing ORDER BY / LIMIT after a BARE VALUES set-op arm binds to the WHOLE
 // set operation, not to the VALUES operand. Regression: parse_values_stmt eats a
 // trailing ORDER BY/LIMIT unconditionally, so `SELECT 1 UNION VALUES (2) ORDER BY 1`
