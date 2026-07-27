@@ -694,7 +694,16 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
             if (op_keyword_id == db25::Keyword::IN) {
                 // Check if next is a subquery or a list
                 ast::ASTNode* in_operand = nullptr;
-                
+
+                // IN must be followed by a parenthesised list or subquery. Anything
+                // else (e.g. `a IN 5`) is malformed; error rather than silently
+                // dropping the IN and degrading the predicate to its bare left
+                // operand (a silent wrong result - the filter would vanish).
+                if (!current_token_ || current_token_->value != "(") {
+                    error("expected '(' with a value list or subquery after IN");
+                    return nullptr;
+                }
+
                 // Look for opening paren
                 if (current_token_ && current_token_->value == "(") {
                     // Peek ahead to see if it's a SELECT

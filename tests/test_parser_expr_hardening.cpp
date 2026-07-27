@@ -673,3 +673,39 @@ TEST_F(ExprHardeningTest, SingleParenIsGroupingNotRow) {
     EXPECT_EQ(lhs->primary_text, "+");
     EXPECT_EQ(find(ast, NodeType::RowConstructor), nullptr) << "no comma -> no row";
 }
+
+// ---- IN requires a parenthesised list or subquery -------------------------
+
+TEST_F(ExprHardeningTest, InWithoutParensIsRejected) {
+    // `a IN 5` (no parens) is malformed; it must error rather than silently
+    // dropping the IN and leaving the predicate as the bare column `a`.
+    EXPECT_EQ(parse("SELECT a FROM t WHERE a IN 5"), nullptr);
+    EXPECT_EQ(parse("SELECT a FROM t WHERE a NOT IN 5"), nullptr);
+}
+
+TEST_F(ExprHardeningTest, InListAndSubqueryStillParse) {
+    // Regression guard: the valid parenthesised forms are unaffected.
+    {
+        auto* ast = parse("SELECT a FROM t WHERE a IN (1, 2, 3)");
+        ASSERT_NE(ast, nullptr);
+        auto* pred = where_predicate(ast);
+        ASSERT_NE(pred, nullptr);
+        EXPECT_EQ(pred->node_type, NodeType::InExpr);
+        EXPECT_EQ(pred->primary_text, "IN");
+    }
+    {
+        auto* ast = parse("SELECT a FROM t WHERE a IN (SELECT id FROM u)");
+        ASSERT_NE(ast, nullptr);
+        auto* pred = where_predicate(ast);
+        ASSERT_NE(pred, nullptr);
+        EXPECT_EQ(pred->node_type, NodeType::InExpr);
+    }
+    {
+        auto* ast = parse("SELECT a FROM t WHERE a NOT IN (1, 2)");
+        ASSERT_NE(ast, nullptr);
+        auto* pred = where_predicate(ast);
+        ASSERT_NE(pred, nullptr);
+        EXPECT_EQ(pred->node_type, NodeType::InExpr);
+        EXPECT_EQ(pred->primary_text, "NOT IN");
+    }
+}
