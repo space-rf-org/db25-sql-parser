@@ -613,7 +613,10 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
     auto fold_intersects = [&](ast::ASTNode* left) -> ast::ASTNode* {
         while (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
             std::string_view keyword = current_token_->value;
-            if (!(keyword == "INTERSECT" || keyword == "intersect")) {
+            // Match on the case-insensitive keyword_id, not the case-preserved
+            // spelling: SQL keywords are case-insensitive, so `Intersect` must
+            // fold exactly like INTERSECT / intersect (else the arm is dropped).
+            if (current_token_->keyword_id != db25::Keyword::INTERSECT) {
                 break;  // not INTERSECT: hand back to the union level
             }
             advance(); // consume INTERSECT
@@ -639,10 +642,13 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
     while (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
         std::string_view keyword = current_token_->value;
         ast::NodeType set_op_type;
-        if (keyword == "UNION" || keyword == "union") {
+        // Case-insensitive keyword_id match (see fold_intersects): a mixed-case
+        // `Union` / `Except` is the same operator as its UPPER / lower spelling.
+        // (MINUS is not a set-op keyword in this tokenizer, so it never reaches
+        // this Keyword-typed loop; it was only ever handled here dead.)
+        if (current_token_->keyword_id == db25::Keyword::UNION) {
             set_op_type = ast::NodeType::UnionStmt;
-        } else if (keyword == "EXCEPT" || keyword == "except" ||
-                   keyword == "MINUS" || keyword == "minus") {
+        } else if (current_token_->keyword_id == db25::Keyword::EXCEPT) {
             set_op_type = ast::NodeType::ExceptStmt;
         } else {
             break;  // not a union-level operator (INTERSECT already folded): done
