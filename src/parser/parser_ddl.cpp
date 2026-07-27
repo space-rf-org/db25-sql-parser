@@ -7,6 +7,7 @@
 #include "db25/parser/parser.hpp"
 #include "db25/parser/tokenizer_adapter.hpp"
 
+#include <algorithm>  // std::min (clamp DECIMAL precision/scale to a byte)
 #include <charconv>
 
 namespace db25::parser {
@@ -440,19 +441,25 @@ ast::ASTNode* Parser::parse_data_type() {
             advance(); // consume (
             parenthesis_depth_++;
             
-            // Parse precision
+            // Store precision and scale packed into the 16-bit semantic_flags:
+            // precision in the low byte, scale in the high byte. `semantic_flags`
+            // is uint16_t, so the previous `scale << 16` shifted entirely out of
+            // the field and was truncated to 0 -- DECIMAL(10,2) silently recorded
+            // scale=0. A byte each covers all real DECIMAL/NUMERIC types (ANSI max
+            // precision 38, and scale <= precision); both are clamped to 255 so an
+            // out-of-range literal cannot spill into the other field.
             if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
-                type_node->semantic_flags = static_cast<uint16_t>(
-                    parse_uint_or(current_token_->value, 0)); // Store precision
+                const uint32_t precision = parse_uint_or(current_token_->value, 0);
+                type_node->semantic_flags = static_cast<uint16_t>(std::min<uint32_t>(precision, 0xFF));
                 advance();
 
                 // Parse scale if present
                 if (current_token_ && current_token_->value == ",") {
                     advance(); // consume comma
                     if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
-                        // Store scale in upper 16 bits
-                        uint32_t scale = parse_uint_or(current_token_->value, 0);
-                        type_node->semantic_flags |= (scale << 16);
+                        const uint32_t scale = parse_uint_or(current_token_->value, 0);
+                        type_node->semantic_flags |= static_cast<uint16_t>(
+                            std::min<uint32_t>(scale, 0xFF) << 8);  // high byte
                         advance();
                     }
                 }
