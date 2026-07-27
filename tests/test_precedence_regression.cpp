@@ -200,6 +200,40 @@ TEST_F(PrecedenceRegressionTest, UnionAllModifierSurvivesIntersectRegroup) {
     EXPECT_EQ(right->node_type, NodeType::IntersectStmt);
 }
 
+// SQL keywords are case-insensitive, so a MIXED-case set-op keyword must fold
+// exactly like its UPPER/lower spelling. Regression: the fold matched the
+// case-preserved token text against only "UNION"/"union", so `Union` fell
+// through, the loop stopped, and the right arm (and operator) were SILENTLY
+// dropped -- `SELECT 1 Union SELECT 2` parsed to a lone SELECT 1. Now the fold
+// matches on the case-insensitive keyword_id.
+TEST_F(PrecedenceRegressionTest, MixedCaseUnionFolds) {
+    auto* ast = parse("SELECT 1 Union SELECT 2");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::UnionStmt);
+    EXPECT_EQ(ast->child_count, 2u);  // both arms kept, nothing dropped
+}
+
+// Mixed-case EXCEPT (any casing) folds like EXCEPT.
+TEST_F(PrecedenceRegressionTest, MixedCaseExceptFolds) {
+    auto* ast = parse("SELECT 1 ExCePt SELECT 2");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::ExceptStmt);
+    EXPECT_EQ(ast->child_count, 2u);
+}
+
+// Mixed-case INTERSECT still binds tighter than UNION: `A UNION B Intersect C`
+// -> UNION(A, INTERSECT(B, C)). Proves the keyword_id switch preserved both the
+// fold and the precedence for a mixed-case inner keyword (regression: the
+// `Intersect` arm was dropped, leaving a plain 2-arm UNION).
+TEST_F(PrecedenceRegressionTest, MixedCaseIntersectBindsTighterThanUnion) {
+    auto* ast = parse("SELECT 1 UNION SELECT 2 Intersect SELECT 3");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::UnionStmt);
+    auto* right = ast->first_child ? ast->first_child->next_sibling : nullptr;
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(right->node_type, NodeType::IntersectStmt);
+}
+
 // GROUP BY with a missing item must not crash (regression: the old code called
 // global delete on an arena-allocated node -> UB). The parser is lenient, so it
 // still returns a SelectStmt; the point is that it completes cleanly (and does
