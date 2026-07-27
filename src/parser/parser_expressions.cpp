@@ -885,6 +885,41 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                     continue;
                 }
 
+                // IS [NOT] DISTINCT FROM <expr> -- a null-safe comparison that is
+                // ALWAYS a plain boolean, never NULL (two NULLs are "not distinct";
+                // a NULL and a non-NULL are "distinct"). Represented as a BinaryExpr
+                // whose operator text the binder maps to
+                // BinaryOp::Is[Not]DistinctFrom. Previously the DISTINCT FROM tail
+                // was silently dropped, leaving the predicate as its bare left
+                // operand (a silent wrong result).
+                if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                    current_token_->keyword_id == db25::Keyword::DISTINCT) {
+                    advance(); // consume DISTINCT
+                    if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
+                        current_token_->keyword_id != db25::Keyword::FROM) {
+                        error("expected FROM after IS [NOT] DISTINCT");
+                        return nullptr;
+                    }
+                    advance(); // consume FROM
+                    ast::ASTNode* rhs = parse_expression(precedence + 1);
+                    if (!rhs) {
+                        error("expected expression after IS [NOT] DISTINCT FROM");
+                        return nullptr;
+                    }
+                    auto* dist_node = arena_.allocate<ast::ASTNode>();
+                    new (dist_node) ast::ASTNode(ast::NodeType::BinaryExpr);
+                    dist_node->node_id = next_node_id_++;
+                    dist_node->primary_text =
+                        copy_to_arena(is_not ? "IS NOT DISTINCT FROM" : "IS DISTINCT FROM");
+                    left->parent = dist_node;
+                    dist_node->first_child = left;
+                    left->next_sibling = rhs;
+                    rhs->parent = dist_node;
+                    dist_node->child_count = 2;
+                    left = dist_node;
+                    continue;
+                }
+
                 // Expect NULL
                 if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
                     (current_token_->value != "NULL" && current_token_->value != "null")) {

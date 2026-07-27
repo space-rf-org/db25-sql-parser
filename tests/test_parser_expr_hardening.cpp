@@ -351,6 +351,41 @@ TEST_F(ExprHardeningTest, IsNullStillParsesAfterBooleanTest) {
     EXPECT_EQ(pred->primary_text, "IS NOT NULL");
 }
 
+// ---- IS [NOT] DISTINCT FROM (null-safe comparison) ------------------------
+
+TEST_F(ExprHardeningTest, IsDistinctFromBuildsBinaryExpr) {
+    // `x IS DISTINCT FROM y` is a binary comparison over both operands, not a
+    // dropped predicate (previously the DISTINCT FROM tail was silently lost,
+    // leaving just `x`).
+    auto* ast = parse("SELECT * FROM t WHERE x IS DISTINCT FROM y");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "IS DISTINCT FROM");
+    ASSERT_NE(pred->first_child, nullptr);
+    EXPECT_EQ(pred->first_child->node_type, NodeType::ColumnRef);
+    EXPECT_EQ(pred->first_child->primary_text, "x");
+    ASSERT_NE(pred->first_child->next_sibling, nullptr);
+    EXPECT_EQ(pred->first_child->next_sibling->node_type, NodeType::ColumnRef);
+    EXPECT_EQ(pred->first_child->next_sibling->primary_text, "y");
+}
+
+TEST_F(ExprHardeningTest, IsNotDistinctFromBuildsBinaryExpr) {
+    auto* ast = parse("SELECT * FROM t WHERE x IS NOT DISTINCT FROM y");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "IS NOT DISTINCT FROM");
+}
+
+TEST_F(ExprHardeningTest, IsDistinctWithoutFromIsRejected) {
+    // `IS DISTINCT` with no FROM is malformed and must not silently drop.
+    auto* ast = parse("SELECT * FROM t WHERE x IS DISTINCT");
+    EXPECT_EQ(ast, nullptr);
+}
+
 // ---- ILIKE (case-insensitive LIKE) ----------------------------------------
 
 TEST_F(ExprHardeningTest, IlikeBuildsLikeExpr) {
