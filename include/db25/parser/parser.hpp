@@ -220,6 +220,18 @@ protected:
     [[nodiscard]] ast::ASTNode* parse_statement();
     [[nodiscard]] ast::ASTNode* parse_with_statement();
     [[nodiscard]] ast::ASTNode* parse_select_stmt();
+    // Parse a parenthesized query block `( <query-expression> )` and return the
+    // inner query node. Used for a parenthesized set-operation operand, including
+    // a LEADING one at statement level: `(SELECT 1) UNION (SELECT 2)`.
+    [[nodiscard]] ast::ASTNode* parse_parenthesized_query();
+    // Fold a set-operation tail (UNION/INTERSECT/EXCEPT/MINUS, two precedence
+    // levels, left-associative) onto an already-parsed first operand, then bind a
+    // trailing ORDER BY / LIMIT to the whole result. Returns the folded node (the
+    // operand itself when no set operator follows).
+    [[nodiscard]] ast::ASTNode* fold_set_operations(ast::ASTNode* first_operand);
+    // Attach a trailing ORDER BY and/or LIMIT (in that order) to `target`, if
+    // present at the current position. No-op when neither keyword is next.
+    void attach_trailing_order_limit(ast::ASTNode* target);
     [[nodiscard]] ast::ASTNode* parse_insert_stmt();
     [[nodiscard]] ast::ASTNode* parse_update_stmt();
     [[nodiscard]] ast::ASTNode* parse_delete_stmt();

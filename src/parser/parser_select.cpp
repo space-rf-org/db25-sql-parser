@@ -425,97 +425,127 @@ ast::ASTNode* Parser::parse_select_stmt() {
         }
     }
     
-    // Parse a trailing ORDER BY and/or LIMIT and append them to `target`. Shared
-    // by the plain-SELECT path (here) and the set-operation path below: a
-    // trailing ORDER BY / LIMIT after `A UNION B` applies to the WHOLE result, so
-    // it must attach to the set-op node, not to B.
-    auto attach_order_by_limit = [&](ast::ASTNode* target) {
-        const auto append = [&](ast::ASTNode* clause) {
-            clause->parent = target;
-            auto* last_child = target->first_child;
-            while (last_child->next_sibling) {
-                last_child = last_child->next_sibling;
-            }
-            last_child->next_sibling = clause;
-            target->child_count++;
-        };
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-            (current_token_->keyword_id == db25::Keyword::ORDER)) {
-            advance(); // consume ORDER
-            if (current_token_ && current_token_->keyword_id == db25::Keyword::BY) {
-                advance(); // consume BY
-                if (auto* order_by = parse_order_by_clause()) {
-                    append(order_by);
-                }
-            }
-        }
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-            (current_token_->keyword_id == db25::Keyword::LIMIT)) {
-            advance(); // consume LIMIT
-            if (auto* limit_clause = parse_limit_clause()) {
-                append(limit_clause);
-            }
-        }
-    };
-
     // A bare set-operation operand (the right branch, and the left before folding)
     // must NOT swallow a trailing ORDER BY / LIMIT: those bind to the whole set
-    // operation and are parsed once, after folding, below. `SELECT 1 UNION SELECT
-    // 2 ORDER BY 1` previously let the right branch eat `ORDER BY 1`, then failed
-    // validation. A parenthesized operand keeps its own ORDER BY (it re-enters
-    // this function outside setop-rhs mode), matching SQL scoping.
+    // operation and are parsed once, after folding (see fold_set_operations).
+    // `SELECT 1 UNION SELECT 2 ORDER BY 1` previously let the right branch eat
+    // `ORDER BY 1`, then failed validation. A parenthesized operand keeps its own
+    // ORDER BY (it re-enters this function outside setop-rhs mode), matching SQL
+    // scoping.
     if (!is_setop_rhs) {
-        attach_order_by_limit(select_node);
+        attach_trailing_order_limit(select_node);
     }
 
-    // Set operations (UNION / INTERSECT / EXCEPT / MINUS) fold LEFT-
-    // associatively: `A op B op C` parses as `(A op B) op C`. If this invocation
-    // is itself the right-hand branch of an enclosing set operation, return the
-    // bare branch and let that caller's loop consume the operator, so the tree is
-    // built left-deep rather than right-deep (which matters for EXCEPT / MINUS).
+    // Set operations fold LEFT-associatively. If this invocation is itself the
+    // right-hand branch of an enclosing set operation, return the bare branch and
+    // let that caller's fold loop consume the operator, so the tree is built
+    // left-deep rather than right-deep (which matters for EXCEPT / MINUS).
     if (is_setop_rhs) {
         return select_node;
     }
-    //
-    // Set operations have TWO precedence levels (SQL standard; matches
-    // Postgres/Oracle/SQL Server/DuckDB/SQLite): INTERSECT binds TIGHTER than
-    // UNION / EXCEPT / MINUS. So `A UNION B INTERSECT C` parses as
-    // `A UNION (B INTERSECT C)`. Within a single level operators fold LEFT-
-    // associatively (`A UNION B UNION C` -> `(A UNION B) UNION C`).
-    //
-    //   union_level    := intersect_level ( (UNION|EXCEPT|MINUS) [ALL] intersect_level )*
-    //   intersect_level:= <select> ( INTERSECT [ALL] <select> )*
-    //
-    // Both levels take a bare single SELECT (or parenthesized query block) as
-    // their operand, obtained by re-entering parse_select_stmt() under the
-    // in_setop_rhs_ guard so the nested call returns its branch without folding
-    // its own set-op tail (this loop owns the folding).
 
-    // Parse one operand: a bare SELECT with no set-op tail of its own, OR a
-    // parenthesized query block `( <query> )` (which may itself be a set
-    // operation, and keeps its own ORDER BY / LIMIT). `SELECT 1 UNION (SELECT 2)`
-    // previously dropped the parenthesized branch entirely.
+    // Otherwise this SELECT is the first operand of a (possibly empty) set-
+    // operation chain: fold any tail onto it and bind a trailing ORDER BY / LIMIT
+    // to the whole result.
+    return fold_set_operations(select_node);
+}
+
+// Attach a trailing ORDER BY and/or LIMIT (in that order) to `target`. Shared by
+// the plain-SELECT path and the set-operation path: a trailing ORDER BY / LIMIT
+// after `A UNION B` applies to the WHOLE result, so it must attach to the set-op
+// node, not to B. No-op when neither keyword is at the current position.
+void Parser::attach_trailing_order_limit(ast::ASTNode* target) {
+    const auto append = [&](ast::ASTNode* clause) {
+        clause->parent = target;
+        auto* last_child = target->first_child;
+        while (last_child->next_sibling) {
+            last_child = last_child->next_sibling;
+        }
+        last_child->next_sibling = clause;
+        target->child_count++;
+    };
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        (current_token_->keyword_id == db25::Keyword::ORDER)) {
+        advance(); // consume ORDER
+        if (current_token_ && current_token_->keyword_id == db25::Keyword::BY) {
+            advance(); // consume BY
+            if (auto* order_by = parse_order_by_clause()) {
+                append(order_by);
+            }
+        }
+    }
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        (current_token_->keyword_id == db25::Keyword::LIMIT)) {
+        advance(); // consume LIMIT
+        if (auto* limit_clause = parse_limit_clause()) {
+            append(limit_clause);
+        }
+    }
+}
+
+// Parse a parenthesized query block `( <query-expression> )` and return the inner
+// query node. The inner block is a complete query (may itself be a set operation,
+// or another parenthesized block) and keeps its own ORDER BY / LIMIT. Guarded
+// against deep `((((...))))` nesting.
+ast::ASTNode* Parser::parse_parenthesized_query() {
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
+
+    parenthesis_depth_++;
+    advance(); // consume '('
+    const bool saved_rhs = in_setop_rhs_;
+    in_setop_rhs_ = false;  // inside the parens it is a complete query block
+
+    ast::ASTNode* inner = nullptr;
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        current_token_->keyword_id == db25::Keyword::WITH) {
+        inner = parse_with_statement();
+    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
+               current_token_->value == "(") {
+        // Nested parenthesized query expression: `((SELECT 1) UNION (SELECT 2))`.
+        // Parse the nested operand, then fold any set-op tail inside these parens.
+        if (ast::ASTNode* nested = parse_parenthesized_query()) {
+            inner = fold_set_operations(nested);
+        }
+    } else {
+        // A leading SELECT parses fully here (set-op fold + trailing ORDER BY /
+        // LIMIT) because in_setop_rhs_ is cleared above.
+        inner = parse_select_stmt();
+    }
+
+    in_setop_rhs_ = saved_rhs;
+    if (current_token_ && current_token_->value == ")") {
+        if (parenthesis_depth_ > 0) parenthesis_depth_--;
+        advance(); // consume ')'
+    } else {
+        error("expected ')' after parenthesized set-operation operand");
+        return nullptr;
+    }
+    return inner;
+}
+
+// Fold a set-operation tail onto an already-parsed first operand.
+//
+// Set operations have TWO precedence levels (SQL standard; matches
+// Postgres/Oracle/SQL Server/DuckDB/SQLite): INTERSECT binds TIGHTER than
+// UNION / EXCEPT / MINUS. So `A UNION B INTERSECT C` parses as
+// `A UNION (B INTERSECT C)`. Within a single level operators fold LEFT-
+// associatively (`A UNION B UNION C` -> `(A UNION B) UNION C`).
+//
+//   union_level    := intersect_level ( (UNION|EXCEPT|MINUS) [ALL] intersect_level )*
+//   intersect_level:= <operand> ( INTERSECT [ALL] <operand> )*
+//
+// An operand is a bare SELECT with no set-op tail of its own (parsed under the
+// in_setop_rhs_ guard so this loop owns the folding) OR a parenthesized query
+// block `( <query> )` (which may itself be a set operation, and keeps its own
+// ORDER BY / LIMIT). A trailing ORDER BY / LIMIT after the whole chain binds to
+// the combined result and is attached here.
+ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
+    // Parse one operand: a parenthesized query block, or a bare SELECT branch.
     auto parse_setop_operand = [&]() -> ast::ASTNode* {
         if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
             current_token_->value == "(") {
-            parenthesis_depth_++;
-            advance(); // consume '('
-            const bool saved_rhs = in_setop_rhs_;
-            in_setop_rhs_ = false;  // inside the parens it is a complete query block
-            ast::ASTNode* inner =
-                (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-                 current_token_->keyword_id == db25::Keyword::WITH)
-                    ? parse_with_statement()
-                    : parse_select_stmt();
-            in_setop_rhs_ = saved_rhs;
-            if (current_token_ && current_token_->value == ")") {
-                if (parenthesis_depth_ > 0) parenthesis_depth_--;
-                advance(); // consume ')'
-            } else {
-                error("expected ')' after parenthesized set-operation operand");
-                return nullptr;
-            }
-            return inner;
+            return parse_parenthesized_query();
         }
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
             (current_token_->keyword_id == db25::Keyword::SELECT)) {
@@ -572,7 +602,7 @@ ast::ASTNode* Parser::parse_select_stmt() {
     // Lower-precedence level: fold UNION / EXCEPT / MINUS left-associatively,
     // each operand first extended by any INTERSECT chain so INTERSECT groups
     // before UNION / EXCEPT.
-    ast::ASTNode* left = fold_intersects(select_node);
+    ast::ASTNode* left = fold_intersects(first_operand);
     while (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
         std::string_view keyword = current_token_->value;
         ast::NodeType set_op_type;
@@ -604,21 +634,19 @@ ast::ASTNode* Parser::parse_select_stmt() {
 
         left = make_setop_node(keyword, set_op_type, left, right, all);
     }
-    select_node = left;
 
-    // A trailing ORDER BY / LIMIT after the whole set operation binds to the
-    // combined result, so it attaches to the (folded) set-op node here. For a
-    // plain SELECT (no operator folded) the clauses were already consumed above,
-    // so this is a no-op.
-    attach_order_by_limit(select_node);
+    // A trailing ORDER BY / LIMIT after the whole chain binds to the combined
+    // result. For a lone operand (no operator folded) the clauses were already
+    // consumed by the caller, so this is a no-op there.
+    attach_trailing_order_limit(left);
 
     // Consume any trailing semicolon
     if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
         current_token_->value == ";") {
         advance();
     }
-    
-    return select_node;
+
+    return left;
 }
 
 // ========== SELECT Clause Parsers ==========
