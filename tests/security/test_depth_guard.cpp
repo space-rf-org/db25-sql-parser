@@ -68,7 +68,82 @@ std::string generate_nested_expr(int depth) {
     return sql.str();
 }
 
+// Generate deeply nested CREATE TRIGGER with a single-statement body:
+// CREATE TRIGGER ... CREATE TRIGGER ... (x depth) SELECT 1. Each level recurses
+// parse_create_trigger -> parse_statement -> parse_create_stmt -> parse_create_trigger.
+std::string generate_nested_triggers_single(int depth) {
+    std::stringstream sql;
+    for (int i = 0; i < depth; ++i) {
+        sql << "CREATE TRIGGER x AFTER INSERT ON t ";
+    }
+    sql << "SELECT 1";
+    return sql.str();
+}
+
+// Same recursion, but through the BEGIN ... END trigger-body form.
+std::string generate_nested_triggers_block(int depth) {
+    std::stringstream sql;
+    for (int i = 0; i < depth; ++i) {
+        sql << "CREATE TRIGGER x AFTER INSERT ON t BEGIN ";
+    }
+    sql << "SELECT 1";
+    for (int i = 0; i < depth; ++i) {
+        sql << " END";
+    }
+    return sql.str();
+}
+
 }  // namespace
+
+// A shallow chain of nested triggers stays under the limit and must parse. This
+// also confirms the recursion is real (each CREATE TRIGGER body can itself be a
+// statement), i.e. the deep cases below exercise a genuine recursion vector.
+TEST(DepthGuard, ShallowNestedTriggersParse) {
+    Parser parser;
+    ASSERT_TRUE(parser.parse(generate_nested_triggers_single(3)).has_value());
+    ASSERT_TRUE(parser.parse(generate_nested_triggers_block(3)).has_value());
+}
+
+// Deeply nested CREATE TRIGGER (single-statement body) previously drove unbounded
+// native recursion and overflowed the stack: every DDL entry point wrote its
+// DepthGuard as an if-init-statement, so the guard object was destroyed at the
+// end of the `if` and depth never accumulated. It must now be rejected gracefully.
+TEST(DepthGuard, DeeplyNestedTriggersSingleRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    auto result = parser.parse(generate_nested_triggers_single(static_cast<int>(limit) * 3));
+    ASSERT_FALSE(result.has_value())
+        << "Deeply nested CREATE TRIGGER must be rejected by the DepthGuard";
+    EXPECT_EQ(result.error().message, kDepthError);
+}
+
+// Deeply nested CREATE TRIGGER through the BEGIN ... END body form. Besides the
+// same defeated-guard stack overflow, this path had a second hazard: the body
+// loop re-called parse_statement() on a token it could not consume without ever
+// advancing, so once the depth guard returned nullptr the crash degraded into an
+// infinite loop. It must terminate and reject gracefully.
+TEST(DepthGuard, DeeplyNestedTriggersBlockRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    auto result = parser.parse(generate_nested_triggers_block(static_cast<int>(limit) * 3));
+    ASSERT_FALSE(result.has_value())
+        << "Deeply nested BEGIN..END triggers must be rejected by the DepthGuard";
+    EXPECT_EQ(result.error().message, kDepthError);
+}
+
+// A stray, unparseable token inside a BEGIN ... END trigger body must not hang.
+// The body loop calls parse_statement(), which returns nullptr on '@'; without a
+// forward-progress guard the loop spins on the same token forever. Completion of
+// this test (it does not time out) is the assertion; the parser must also stay
+// usable afterwards.
+TEST(DepthGuard, GarbageInTriggerBodyTerminates) {
+    Parser parser;
+    (void)parser.parse("CREATE TRIGGER x AFTER INSERT ON t BEGIN @ END");
+    // Reusable after the (previously hanging) input.
+    auto ok = parser.parse("SELECT * FROM users WHERE id = 1");
+    ASSERT_TRUE(ok.has_value())
+        << "Parser must remain usable after a malformed trigger body";
+}
 
 // A modestly nested query stays well under the default limit and must parse.
 TEST(DepthGuard, ShallowNestedQueryParses) {

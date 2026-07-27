@@ -64,7 +64,8 @@ namespace {
 
 ast::ASTNode* Parser::parse_create_stmt() {
     // Dispatch to specific CREATE statement based on object type
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // Save state in case we need to reset
     const auto* start_token = current_token_;
@@ -277,7 +278,8 @@ ast::ASTNode* Parser::parse_create_view_impl() {
 // ========== End Three-Tier Architecture ==========
 
 ast::ASTNode* Parser::parse_drop_stmt() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // Consume DROP keyword
     advance();
@@ -329,7 +331,8 @@ ast::ASTNode* Parser::parse_drop_stmt() {
 }
 
 ast::ASTNode* Parser::parse_truncate_stmt() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // Consume TRUNCATE keyword
     advance();
@@ -369,7 +372,8 @@ ast::ASTNode* Parser::parse_alter_table_stmt() {
 
 // Helper function to parse data type
 ast::ASTNode* Parser::parse_data_type() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     auto* type_node = arena_.allocate<ast::ASTNode>();
     new (type_node) ast::ASTNode(ast::NodeType::DataTypeNode);
@@ -488,7 +492,8 @@ ast::ASTNode* Parser::parse_data_type() {
 
 // Parse column constraint (NOT NULL, PRIMARY KEY, etc.)
 ast::ASTNode* Parser::parse_column_constraint() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     ast::ASTNode* constraint = nullptr;
     
@@ -669,7 +674,8 @@ int Parser::parse_paren_identifier_list(ast::ASTNode* parent) {
 }
 
 ast::ASTNode* Parser::parse_column_definition() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     auto* column = arena_.allocate<ast::ASTNode>();
     new (column) ast::ASTNode(ast::NodeType::ColumnDefinition);
@@ -714,7 +720,8 @@ ast::ASTNode* Parser::parse_column_definition() {
 
 // Parse table constraint (multi-column constraints)
 ast::ASTNode* Parser::parse_table_constraint() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     ast::ASTNode* constraint = nullptr;
 
@@ -867,7 +874,8 @@ ast::ASTNode* Parser::parse_table_constraint() {
 
 // Improved CREATE TABLE implementation
 ast::ASTNode* Parser::parse_create_table_impl() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // We're at TABLE keyword
     advance();  // Skip TABLE
@@ -976,7 +984,8 @@ ast::ASTNode* Parser::parse_create_table_impl() {
 
 // Improved ALTER TABLE implementation
 ast::ASTNode* Parser::parse_alter_table_full() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // We're at ALTER keyword
     advance();  // Skip ALTER
@@ -1195,7 +1204,8 @@ ast::ASTNode* Parser::parse_alter_table_full() {
 
 // Improved CREATE INDEX implementation
 ast::ASTNode* Parser::parse_create_index_full() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // We might be at UNIQUE or INDEX
     bool is_unique = false;
@@ -1332,7 +1342,8 @@ ast::ASTNode* Parser::parse_create_index_full() {
 
 // Parse CREATE TRIGGER statement
 ast::ASTNode* Parser::parse_create_trigger() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // We're at CREATE keyword
     advance();  // Skip CREATE
@@ -1473,10 +1484,25 @@ ast::ASTNode* Parser::parse_create_trigger() {
                 last_stmt = stmt;
                 trigger_node->child_count++;
             }
-            
-            // Skip semicolons between statements
+
+            // Skip semicolons between statements.
+            bool progressed = false;
             if (current_token_ && current_token_->value == ";") {
                 advance();
+                progressed = true;
+            }
+
+            // Forward-progress guard: if this iteration neither parsed a
+            // statement nor consumed a separator, the current token is one
+            // parse_statement() cannot start a statement from (a stray token, or
+            // the recursion-depth guard tripping and returning nullptr). Without
+            // this, the loop re-calls parse_statement() on the same token
+            // forever -- an infinite loop e.g. on `... BEGIN @ END`, and the hang
+            // that deep nested-trigger input degrades into once the depth guard
+            // stops it from overflowing the stack. Stop the body here; the parser
+            // is lenient about the unconsumed remainder.
+            if (!stmt && !progressed) {
+                break;
             }
         }
         
@@ -1502,7 +1528,8 @@ ast::ASTNode* Parser::parse_create_trigger() {
 
 // Parse CREATE SCHEMA statement
 ast::ASTNode* Parser::parse_create_schema() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
     
     // We're at CREATE keyword
     advance();  // Skip CREATE
