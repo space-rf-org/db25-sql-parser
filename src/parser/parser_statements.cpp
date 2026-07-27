@@ -12,7 +12,8 @@ namespace db25::parser {
 // ========== Transaction Control Statements ==========
 
 ast::ASTNode* Parser::parse_transaction_stmt() {
-    if (const DepthGuard guard(this); !guard.is_valid()) return nullptr;
+    DepthGuard guard(this);
+    if (!guard.is_valid()) return nullptr;
 
     if (const auto keyword_id = current_token_->keyword_id; keyword_id == db25::Keyword::BEGIN || keyword_id == db25::Keyword::START) {
         // BEGIN [TRANSACTION|WORK] [isolation_level]
