@@ -262,14 +262,16 @@ ast::ASTNode* Parser::parse_create_view_impl() {
     // Expect AS keyword
     if (current_token_ && current_token_->keyword_id == db25::Keyword::AS) {
         advance();
-        
-        // Parse SELECT statement
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::SELECT) {
-            create_node->first_child = parse_select_stmt();
-            if (create_node->first_child) {
-                create_node->first_child->parent = create_node;
-                create_node->child_count = 1;
-            }
+
+        // The view body is any query expression - SELECT, a set operation, WITH,
+        // or a VALUES list (`CREATE VIEW v AS VALUES (1),(2)` /
+        // `... AS VALUES (1) UNION SELECT 2`). Dispatch through the shared
+        // query-body parser; previously only a leading SELECT was accepted, so a
+        // VALUES body was silently dropped (the view had no query child).
+        create_node->first_child = parse_query_body();
+        if (create_node->first_child) {
+            create_node->first_child->parent = create_node;
+            create_node->child_count = 1;
         }
     }
     

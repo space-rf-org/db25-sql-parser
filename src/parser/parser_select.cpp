@@ -191,27 +191,12 @@ ast::ASTNode* Parser::parse_with_statement() {
         
         // At this point, we should be inside the CTE query parentheses
         
-        // Parse the CTE query (could be SELECT or WITH for nested CTEs)
-        ast::ASTNode* cte_query = nullptr;
-#ifdef DEBUG_CTE
-        // std::cerr << "DEBUG: About to parse CTE query. Current token: ";
-        if (current_token_) {
-            std::cerr << current_token_->value << " type: " << static_cast<int>(current_token_->type);
-        }
-        std::cerr << std::endl;
-#endif
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
-            if (current_token_->keyword_id == db25::Keyword::SELECT) {
-#ifdef DEBUG_CTE
-                // std::cerr << "DEBUG: Parsing SELECT in CTE" << std::endl;
-#endif
-                cte_query = parse_select_stmt();
-                // parse_select_stmt might return a UNION/INTERSECT/EXCEPT node
-                // That's fine for CTEs, especially recursive ones
-            } else if (current_token_->keyword_id == db25::Keyword::WITH) {
-                cte_query = parse_with_statement();
-            }
-        }
+        // The CTE body is any query expression - SELECT, a set operation, a
+        // nested WITH, or a VALUES list (`WITH t AS (VALUES (1),(2))` /
+        // `WITH t AS (VALUES (1) UNION SELECT 2)`). Dispatch through the shared
+        // query-body parser so it matches every other query-block site; the
+        // enclosing `(` was already consumed above and the `)` is consumed below.
+        ast::ASTNode* cte_query = parse_query_body();
         
         if (cte_query) {
             cte_query->parent = cte_def;
@@ -497,45 +482,61 @@ void Parser::attach_trailing_order_limit(ast::ASTNode* target) {
 // query node. The inner block is a complete query (may itself be a set operation,
 // or another parenthesized block) and keeps its own ORDER BY / LIMIT. Guarded
 // against deep `((((...))))` nesting.
+bool Parser::at_query_block_start() const {
+    if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword) {
+        return false;
+    }
+    const auto k = current_token_->keyword_id;
+    return k == db25::Keyword::SELECT || k == db25::Keyword::VALUES ||
+           k == db25::Keyword::WITH;
+}
+
+ast::ASTNode* Parser::parse_query_body() {
+    if (!current_token_) {
+        return nullptr;
+    }
+    // A query body is a complete, self-contained block: clear the set-op-RHS flag
+    // so the body folds its own set-op tail / trailing ORDER BY / LIMIT (restored
+    // for the caller). Every branch folds any set-operation tail, so a VALUES or
+    // SELECT operand followed by `UNION ...` is never left unconsumed.
+    const bool saved_rhs = in_setop_rhs_;
+    in_setop_rhs_ = false;
+    ast::ASTNode* result = nullptr;
+    if (current_token_->type == tokenizer::TokenType::Keyword &&
+        current_token_->keyword_id == db25::Keyword::WITH) {
+        result = parse_with_statement();
+    } else if (current_token_->type == tokenizer::TokenType::Keyword &&
+               current_token_->keyword_id == db25::Keyword::VALUES) {
+        if (ast::ASTNode* v = parse_values_stmt()) {
+            result = fold_set_operations(v);
+        }
+    } else if (current_token_->type == tokenizer::TokenType::Delimiter &&
+               current_token_->value == "(") {
+        // A nested parenthesized query block: `((SELECT 1) UNION (SELECT 2))`.
+        if (ast::ASTNode* nested = parse_parenthesized_query()) {
+            result = fold_set_operations(nested);
+        }
+    } else if (current_token_->type == tokenizer::TokenType::Keyword &&
+               current_token_->keyword_id == db25::Keyword::SELECT) {
+        // parse_select_stmt folds its own set-op tail + trailing ORDER BY / LIMIT.
+        result = parse_select_stmt();
+    }
+    in_setop_rhs_ = saved_rhs;
+    return result;
+}
+
 ast::ASTNode* Parser::parse_parenthesized_query() {
     DepthGuard guard(this);
     if (!guard.is_valid()) return nullptr;
 
     parenthesis_depth_++;
     advance(); // consume '('
-    const bool saved_rhs = in_setop_rhs_;
-    in_setop_rhs_ = false;  // inside the parens it is a complete query block
 
-    ast::ASTNode* inner = nullptr;
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-        current_token_->keyword_id == db25::Keyword::WITH) {
-        inner = parse_with_statement();
-    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-               current_token_->keyword_id == db25::Keyword::VALUES) {
-        // `( VALUES (..), (..) )` is a query block too. Without this, VALUES fell
-        // to the SELECT path below and parse_select_stmt consumed the `VALUES`
-        // keyword as if it were `SELECT`, silently transposing the rows into a
-        // one-row select list. VALUES may also be the LEFT operand of a set
-        // operation INSIDE the parens (`( VALUES (1) UNION SELECT 2 )`), so fold
-        // any set-op tail here - exactly as the SELECT and nested-paren branches
-        // do - rather than leaving the `UNION ...` unconsumed (which then failed
-        // the `)` check and dropped the whole query).
-        if (ast::ASTNode* v = parse_values_stmt()) {
-            inner = fold_set_operations(v);
-        }
-    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
-               current_token_->value == "(") {
-        // Nested parenthesized query expression: `((SELECT 1) UNION (SELECT 2))`.
-        // Parse the nested operand, then fold any set-op tail inside these parens.
-        if (ast::ASTNode* nested = parse_parenthesized_query()) {
-            inner = fold_set_operations(nested);
-        }
-    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-               current_token_->keyword_id == db25::Keyword::SELECT) {
-        // A leading SELECT parses fully here (set-op fold + trailing ORDER BY /
-        // LIMIT) because in_setop_rhs_ is cleared above.
-        inner = parse_select_stmt();
-    } else {
+    // Every parenthesized query dispatches through the one shared query-body
+    // parser, so a `( VALUES ... )`, `( VALUES (1) UNION SELECT 2 )`, or nested
+    // block is handled identically to the statement / derived-table / CTE sites.
+    ast::ASTNode* inner = parse_query_body();
+    if (!inner) {
         // Not a query block. parse_select_stmt() would blindly consume the first
         // token as if it were SELECT (e.g. `(1 + 2)` -> `SELECT + 2`), a silent
         // mis-parse; reject instead.
@@ -544,7 +545,6 @@ ast::ASTNode* Parser::parse_parenthesized_query() {
         return nullptr;
     }
 
-    in_setop_rhs_ = saved_rhs;
     if (current_token_ && current_token_->value == ")") {
         if (parenthesis_depth_ > 0) parenthesis_depth_--;
         advance(); // consume ')'
@@ -1566,22 +1566,12 @@ ast::ASTNode* Parser::parse_table_reference() {
             subquery_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::IsSubquery);
 
             push_context(ParseContext::SUBQUERY);
-            // The derived-table body is a SELECT, a WITH ... SELECT, or a VALUES
-            // list ( "(VALUES (1, 2), (3, 4)) AS t (a, b)" ). Dispatch on the
-            // leading keyword; without the VALUES arm the "(" matched neither a
-            // derived table nor a join group, so the whole FROM item was dropped.
-            ast::ASTNode* inner = nullptr;
-            if (current_token_ &&
-                current_token_->type == tokenizer::TokenType::Keyword &&
-                current_token_->keyword_id == db25::Keyword::WITH) {
-                inner = parse_with_statement();
-            } else if (current_token_ &&
-                       current_token_->type == tokenizer::TokenType::Keyword &&
-                       current_token_->keyword_id == db25::Keyword::VALUES) {
-                inner = parse_values_stmt();
-            } else {
-                inner = parse_select_stmt();
-            }
+            // The derived-table body is any query expression: a SELECT, a set
+            // operation, a WITH ... query, or a VALUES list - including a VALUES
+            // set operation (`(VALUES (1) UNION SELECT 2) t`). Dispatch through
+            // the shared query-body parser so the set-op tail is folded (a bare
+            // parse_values_stmt left `UNION ...` unconsumed and dropped the item).
+            ast::ASTNode* inner = parse_query_body();
             pop_context();
             if (inner) {
                 inner->parent = subquery_node;
