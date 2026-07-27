@@ -262,3 +262,67 @@ TEST_F(PrecedenceRegressionTest, PlainSelectStillAttachesOrderByLimit) {
     EXPECT_NE(find(root, NodeType::OrderByClause), nullptr);
     EXPECT_NE(find(root, NodeType::LimitClause), nullptr);
 }
+
+// ---- LEADING parenthesized set-op operand ---------------------------------
+// A set operation may begin with a parenthesized query block:
+// `(SELECT 1) UNION (SELECT 2)`. Previously a leading '(' at statement level was
+// not dispatched at all and the whole statement failed to parse.
+
+// Both operands parenthesized: root is UNION over exactly two SELECT branches.
+TEST_F(PrecedenceRegressionTest, LeadingParenBothOperands) {
+    auto* root = parse("(SELECT 1) UNION (SELECT 2)");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    auto* left = root->first_child;
+    auto* right = left ? left->next_sibling : nullptr;
+    ASSERT_NE(left, nullptr);
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(left->node_type, NodeType::SelectStmt);
+    EXPECT_EQ(right->node_type, NodeType::SelectStmt);
+}
+
+// A parenthesized left operand with a bare right operand also folds.
+TEST_F(PrecedenceRegressionTest, LeadingParenLeftBareRight) {
+    auto* root = parse("(SELECT a FROM t1) UNION SELECT b FROM t2");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    int selects = 0;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::SelectStmt) ++selects;
+    }
+    EXPECT_EQ(selects, 2);
+}
+
+// Parentheses OVERRIDE the INTERSECT-binds-tighter precedence:
+// `(A UNION B) INTERSECT C` must root at INTERSECT with the UNION as its LEFT
+// child -- the opposite grouping from the unparenthesized `A UNION B INTERSECT C`
+// (which roots at UNION, verified by IntersectBindsTighterThanUnion above).
+TEST_F(PrecedenceRegressionTest, LeadingParenOverridesPrecedence) {
+    auto* root = parse("(SELECT 1 UNION SELECT 2) INTERSECT SELECT 3");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::IntersectStmt);
+    auto* left = root->first_child;
+    ASSERT_NE(left, nullptr);
+    EXPECT_EQ(left->node_type, NodeType::UnionStmt)
+        << "parenthesized UNION must be the INTERSECT's left operand";
+}
+
+// A trailing ORDER BY after a fully parenthesized set operation binds to the
+// whole result, and nested parens `((...) UNION (...))` parse cleanly.
+TEST_F(PrecedenceRegressionTest, LeadingParenNestedWithTrailingOrderBy) {
+    auto* root = parse("((SELECT 1) UNION (SELECT 2)) ORDER BY 1");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnionStmt);
+    ASTNode* order_by = nullptr;
+    for (auto* c = root->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::OrderByClause) order_by = c;
+    }
+    ASSERT_NE(order_by, nullptr) << "ORDER BY must attach to the UNION node";
+}
+
+// A lone parenthesized query is just that query (no phantom set-op wrapper).
+TEST_F(PrecedenceRegressionTest, LoneParenthesizedQueryUnwraps) {
+    auto* root = parse("(SELECT a FROM t)");
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::SelectStmt);
+}

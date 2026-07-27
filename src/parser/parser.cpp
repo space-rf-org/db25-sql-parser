@@ -317,8 +317,24 @@ ast::ASTNode* Parser::parse_statement() {
         if (pos + 3 < tokens.size()) __builtin_prefetch(&tokens[pos + 3], 0, 1);
     }
     
+    // A statement may begin with a parenthesized query block that is the LEFT
+    // operand of a set operation -- `(SELECT ...) UNION (SELECT ...)` -- or simply
+    // a parenthesized query, optionally with a trailing ORDER BY / LIMIT that
+    // binds to the whole result: `(SELECT ...) ORDER BY 1`. Parse the operand,
+    // then fold any set-operation tail. (Inside FROM / expressions, parentheses
+    // are handled by their own parsers; this only covers a leading '(' at
+    // statement level.)
+    if (current_token_->type == tokenizer::TokenType::Delimiter &&
+        current_token_->value == "(") {
+        ast::ASTNode* first = parse_parenthesized_query();
+        if (!first) {
+            return nullptr;
+        }
+        return fold_set_operations(first);
+    }
+
     // Check if it's a keyword or identifier (some DDL keywords like TRUNCATE aren't in the keyword list)
-    if (current_token_->type != tokenizer::TokenType::Keyword && 
+    if (current_token_->type != tokenizer::TokenType::Keyword &&
         current_token_->type != tokenizer::TokenType::Identifier) {
         return nullptr;
     }
