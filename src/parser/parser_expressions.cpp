@@ -982,10 +982,17 @@ ast::ASTNode* Parser::parse_case_expression() {
     ast::ASTNode* last_child = nullptr;
     ast::ASTNode* search_expr = nullptr;
     
-    // Check if this is a searched CASE (has expression after CASE)
-    if ((current_token_ && current_token_->type != tokenizer::TokenType::Keyword) ||
-        (current_token_->value != "WHEN" && current_token_->value != "when")) {
-        // Parse the search expression
+    // A searched CASE (`CASE WHEN ...`) has no operand between CASE and the first
+    // WHEN; a simple CASE (`CASE x WHEN ...`) does. Detect the WHEN by keyword id
+    // - not by comparing the token text to "WHEN"/"when", which missed a
+    // mixed-case `When` (SQL keywords are case-insensitive) and mis-parsed it as a
+    // simple-CASE operand, losing every branch. Guarding on the keyword id also
+    // avoids dereferencing a null current token.
+    const bool at_when = current_token_ != nullptr &&
+                         current_token_->type == tokenizer::TokenType::Keyword &&
+                         current_token_->keyword_id == db25::Keyword::WHEN;
+    if (!at_when) {
+        // Parse the search expression (the simple-CASE operand).
         search_expr = parse_expression(0);
         if (search_expr) {
             search_expr->parent = case_node;
@@ -1064,12 +1071,18 @@ ast::ASTNode* Parser::parse_case_expression() {
         }
     }
     
-    // Expect END
+    // Expect END. A CASE without its closing END is malformed; error rather than
+    // silently accepting a truncated expression (parse() surfaces the recorded
+    // error once the null unwinds to the top).
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::END)) {
         advance(); // consume END
+    } else {
+        error("expected END to close CASE expression");
+        pop_context();
+        return nullptr;
     }
-    
+
     pop_context();
     return case_node;
 }
