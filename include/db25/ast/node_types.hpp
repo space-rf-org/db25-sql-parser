@@ -229,7 +229,12 @@ enum class BinaryOp : uint8_t {
     Is,
     IsNot,
     In,
-    NotIn
+    NotIn,
+    // Null-safe comparison: `a IS DISTINCT FROM b` / `a IS NOT DISTINCT FROM b`.
+    // Always a plain boolean, never NULL (two NULLs are "not distinct"; a NULL
+    // and a non-NULL are "distinct"). Appended to preserve existing enum values.
+    IsDistinctFrom,
+    IsNotDistinctFrom
 };
 
 /**
