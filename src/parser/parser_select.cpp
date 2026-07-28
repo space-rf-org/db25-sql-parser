@@ -2141,7 +2141,21 @@ ast::ASTNode* Parser::parse_function_call() {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::OVER)) {
         advance(); // consume OVER
-        
+
+        // OVER must be followed by an inline window specification `(...)`. A
+        // named-window reference `OVER <window-name>` (resolving a WINDOW clause)
+        // is not supported - and must be REJECTED, not silently mis-parsed: with
+        // no '(' the window spec below is dropped and the leftover window name is
+        // swallowed as this function's column alias, producing an AST identical to
+        // a plain (non-windowed) call - a silent wrong result the analyzer/binder
+        // would lower to a non-windowed computation. (WINDOW-clause support is a
+        // separate feature; until then reject cleanly, as with DISTINCT ON.)
+        if (!current_token_ || current_token_->value != "(") {
+            error("window function over a named window (OVER <window-name>) is "
+                  "not supported; use an inline OVER (...) specification");
+            return nullptr;
+        }
+
         // Parse window specification
         auto* window_spec = parse_window_spec();
         if (window_spec) {
