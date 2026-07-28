@@ -319,11 +319,20 @@ ast::ASTNode* Parser::parse_update_stmt() {
         }
         first = false;
         
-        // Parse column name
-        if (!current_token_ || 
+        // Parse column name. A SET assignment target must be a bare column name.
+        // If one is not present here a column was EXPECTED (this is either the
+        // first target after SET, or the token right after a consumed comma), so
+        // anything else is malformed - reject the statement rather than silently
+        // stopping. Silently breaking left an UpdateStmt with an empty/partial
+        // SET and every following clause (WHERE / FROM / RETURNING) discarded as
+        // leftover tokens with no diagnostic - e.g. the SQL row-assignment form
+        // `SET (a,b)=(1,2) WHERE id=1` parsed as SET-nothing and dropped the WHERE
+        // filter. The parenthesized multi-column assignment is not supported; it
+        // is rejected cleanly (like OVER <named-window> and DISTINCT ON).
+        if (!current_token_ ||
             (current_token_->type != tokenizer::TokenType::Identifier &&
              current_token_->type != tokenizer::TokenType::Keyword)) {
-            break;  // Expected column name
+            return nullptr;  // Expected a column name for the SET target
         }
         
         auto* assignment = arena_.allocate<ast::ASTNode>();
@@ -335,10 +344,11 @@ ast::ASTNode* Parser::parse_update_stmt() {
         assignment->primary_text = copy_to_arena(current_token_->value);
         advance();
         
-        // Expect = operator
+        // Expect = operator. A column name with no following `=` is malformed
+        // (`SET a b ...`); reject rather than silently dropping this and every
+        // subsequent clause.
         if (!current_token_ || current_token_->value != "=") {
-            // Arena allocated - don't delete
-            break;  // Expected =
+            return nullptr;  // Expected '=' after the SET target
         }
         advance();  // consume =
         
