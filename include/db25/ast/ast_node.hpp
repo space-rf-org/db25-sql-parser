@@ -22,8 +22,64 @@
 #include <vector>
 #include <expected>
 #include <utility>
+#include <type_traits>
 
 namespace db25::ast {
+
+/**
+ * A 16-bit child counter that SATURATES at 0xFFFF instead of wrapping.
+ *
+ * The AST node stores its direct-child count in 2 bytes (the packed 128-byte
+ * layout has no room to widen it). Node builders bump it with a raw `++` at
+ * ~85 sites, so on pathological, machine-generated input - a SELECT list, an
+ * IN list, or a VALUES clause with >= 65536 elements - a plain uint16_t would
+ * wrap modulo 65536. Exactly 65536 children wrap to 0, which makes
+ * get_children()'s `child_count == 0` early-out drop a fully-linked child list.
+ *
+ * Behaving like a uint16_t but capping every increment at 0xFFFF keeps the
+ * field monotonic and truthful up to 65534; 0xFFFF is a sentinel meaning
+ * ">= 65535 children - walk first_child/next_sibling for the exact count".
+ * Same size and layout as the uint16_t it replaces, so no call site changes.
+ */
+struct SaturatingChildCount {
+    static constexpr uint16_t kSaturated = 0xFFFF;
+    uint16_t value = 0;
+
+    constexpr SaturatingChildCount() noexcept = default;
+    constexpr SaturatingChildCount(uint16_t v) noexcept : value(v) {}  // NOLINT: implicit by design
+    constexpr operator uint16_t() const noexcept { return value; }
+
+    constexpr SaturatingChildCount& operator=(uint16_t v) noexcept {
+        value = v;
+        return *this;
+    }
+    constexpr SaturatingChildCount& operator++() noexcept {
+        if (value != kSaturated) {
+            ++value;
+        }
+        return *this;
+    }
+    constexpr SaturatingChildCount operator++(int) noexcept {
+        const SaturatingChildCount old = *this;
+        ++*this;
+        return old;
+    }
+    constexpr SaturatingChildCount& operator--() noexcept {
+        // Once saturated the exact count is unknown, so a decrement leaves the
+        // sentinel sticky rather than falsely claiming exactly 65534.
+        if (value != 0 && value != kSaturated) {
+            --value;
+        }
+        return *this;
+    }
+    constexpr SaturatingChildCount operator--(int) noexcept {
+        const SaturatingChildCount old = *this;
+        --*this;
+        return old;
+    }
+};
+static_assert(sizeof(SaturatingChildCount) == 2, "child count must stay 2 bytes");
+static_assert(std::is_trivially_copyable_v<SaturatingChildCount>);
 
 /**
  * 128-byte cache-aligned AST Node
@@ -42,7 +98,7 @@ struct alignas(128) ASTNode {
     // === Header (8 bytes) ===
     NodeType node_type;           // 1 byte - Node type enum
     NodeFlags flags;              // 1 byte - Boolean flags
-    uint16_t child_count;         // 2 bytes - Number of children
+    SaturatingChildCount child_count;  // 2 bytes - Number of children (saturates at 0xFFFF)
     uint32_t node_id;            // 4 bytes - Unique ID for this node
     
     // === Source Mapping (8 bytes) ===

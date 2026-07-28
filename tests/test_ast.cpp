@@ -11,6 +11,52 @@ TEST(ASTNodeTest, SizeAndAlignment) {
     EXPECT_EQ(alignof(ASTNode), 128);
 }
 
+TEST(ASTNodeTest, ChildCountSaturatesInsteadOfWrapping) {
+    // The 2-byte child_count must saturate at 0xFFFF, never wrap. A plain uint16_t
+    // wraps modulo 65536 on a node with >= 65536 direct children (machine-generated
+    // SELECT / IN / VALUES lists); exactly 65536 wraps to 0, which would make
+    // get_children()'s `child_count == 0` early-out drop a fully-linked child list.
+    EXPECT_EQ(sizeof(SaturatingChildCount), 2u);
+
+    SaturatingChildCount c;
+    EXPECT_EQ(static_cast<uint16_t>(c), 0);
+    for (int i = 0; i < 65534; ++i) { c++; }
+    EXPECT_EQ(static_cast<uint16_t>(c), 65534);   // exact up to 65534
+    c++;
+    EXPECT_EQ(static_cast<uint16_t>(c), 65535);   // reaches the sentinel
+    c++;                                          // would wrap to 0 without saturation
+    EXPECT_EQ(static_cast<uint16_t>(c), 65535);   // stuck at 0xFFFF
+    for (int i = 0; i < 1000; ++i) { c++; }
+    EXPECT_EQ(static_cast<uint16_t>(c), 65535);   // stays saturated
+    --c;                                          // saturated count is unknown: sticky
+    EXPECT_EQ(static_cast<uint16_t>(c), 65535);
+
+    // Assignment of a small constant (the `child_count = 1/2/3` builder sites) and
+    // ordinary decrement below the sentinel behave like a plain counter.
+    c = 3;
+    EXPECT_EQ(static_cast<uint16_t>(c), 3);
+    --c;
+    EXPECT_EQ(static_cast<uint16_t>(c), 2);
+}
+
+TEST(ASTNodeTest, AddChildSaturatesAndKeepsListIntact) {
+    // add_child() bumps child_count; past the sentinel the cached count saturates
+    // but the sibling list stays fully linked, so get_children() still returns every
+    // child. This is the metadata-vs-traversal invariant the wrap would have broken.
+    ASTNode parent(NodeType::SelectList);
+    std::vector<ASTNode> kids(3);
+    for (auto& k : kids) { parent.add_child(&k); }
+    EXPECT_EQ(parent.child_count, 3);
+    EXPECT_EQ(parent.get_children().size(), 3u);
+
+    // Force the counter to the sentinel, then add one more real child.
+    parent.child_count = SaturatingChildCount::kSaturated;
+    ASTNode extra(NodeType::ColumnRef);
+    parent.add_child(&extra);
+    EXPECT_EQ(parent.child_count, SaturatingChildCount::kSaturated);  // did not wrap to 0
+    EXPECT_EQ(parent.get_children().size(), 4u);                      // list still complete
+}
+
 TEST(ASTNodeTest, DefaultConstruction) {
     const ASTNode node;
     
