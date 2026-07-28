@@ -66,6 +66,13 @@ int main() {
         {"GROUP BY", "SELECT status, COUNT(*) FROM users GROUP BY status", true},
         {"HAVING", "SELECT status, COUNT(*) FROM users GROUP BY status HAVING COUNT(*) > 10", true},
         
+        // Window functions: an inline OVER (...) spec parses; a named-window
+        // reference OVER <name> is unsupported and must be REJECTED, not silently
+        // mis-parsed as a column alias on the function (which drops the window).
+        {"Window inline OVER", "SELECT rank() OVER (ORDER BY age) FROM users", true},
+        {"Window empty OVER", "SELECT rank() OVER () FROM users", true},
+        {"Window named OVER rejected", "SELECT rank() OVER w FROM users", false},
+
         // ORDER BY and LIMIT
         {"ORDER BY", "SELECT * FROM users ORDER BY created_at DESC, name ASC", true},
         {"LIMIT OFFSET", "SELECT * FROM users LIMIT 10 OFFSET 20", true},
