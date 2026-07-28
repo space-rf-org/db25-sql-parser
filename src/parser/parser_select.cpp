@@ -2024,12 +2024,19 @@ ast::ASTNode* Parser::parse_function_call() {
     parenthesis_depth_++;
     advance(); // consume '('
     
-    // Check for DISTINCT keyword (for aggregate functions)
+    // Check for a leading set-quantifier (for aggregate functions). DISTINCT
+    // de-duplicates the input; ALL is its dual and the DEFAULT, so it is a no-op
+    // that must still be CONSUMED - otherwise `count(ALL x)` / `sum(ALL x)` (legal
+    // SQL) leaves ALL sitting where an argument is expected and fails to parse,
+    // while the DISTINCT sibling parses fine.
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::DISTINCT)) {
         func_call->set_flag(ast::NodeFlags::Distinct);  // Use built-in method that sets the flag properly
         func_call->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::Distinct);  // Also set semantic_flags for compatibility
         advance(); // consume DISTINCT
+    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+               (current_token_->keyword_id == db25::Keyword::ALL)) {
+        advance(); // consume ALL (the default quantifier; no flag)
     }
     
     // Parse arguments
