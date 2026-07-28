@@ -63,6 +63,10 @@ int main() {
         
         // Aggregate functions
         {"Aggregates", "SELECT COUNT(*), MAX(age), MIN(age), AVG(age), SUM(total) FROM orders", true},
+        // ALL is the default aggregate set-quantifier (the dual of DISTINCT) and
+        // must parse, not be rejected as a syntax error.
+        {"Aggregate ALL", "SELECT COUNT(ALL age), SUM(ALL total) FROM orders", true},
+        {"Aggregate DISTINCT", "SELECT COUNT(DISTINCT age) FROM orders", true},
         {"GROUP BY", "SELECT status, COUNT(*) FROM users GROUP BY status", true},
         {"HAVING", "SELECT status, COUNT(*) FROM users GROUP BY status HAVING COUNT(*) > 10", true},
         
