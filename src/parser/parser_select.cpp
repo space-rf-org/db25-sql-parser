@@ -478,30 +478,34 @@ void Parser::attach_trailing_order_limit(ast::ASTNode* target) {
     }
 }
 
-// Parse a parenthesized query block `( <query-expression> )` and return the inner
-// query node. The inner block is a complete query (may itself be a set operation,
-// or another parenthesized block) and keeps its own ORDER BY / LIMIT. Guarded
-// against deep `((((...))))` nesting.
-std::size_t Parser::scan_query_expression(std::size_t from,
-                                          std::size_t depth) const {
-    // Guard `(((...)))` from recursing this predicate to a stack overflow; beyond
-    // any realistic nesting we conservatively report "not a query expression" and
-    // let the normal recursive-descent DepthGuard produce a graceful error.
-    constexpr std::size_t kMaxDepth = 256;
-    if (tokenizer_ == nullptr || depth > kMaxDepth) {
-        return kNoQueryExpr;
+// Does the parenthesized group whose CONTENT begins at token index `from`
+// constitute a query body - a query expression that fills the group exactly?
+//
+//   query_expr := primary ( (UNION|INTERSECT|EXCEPT) [ALL|DISTINCT] primary )*
+//   primary    := '(' query_expr ')' | (SELECT|VALUES|WITH) <body>
+//
+// This distinguishes a parenthesized query body - `(SELECT 1)`, `((SELECT 1))`,
+// `((SELECT 1) UNION (SELECT 2))` - from a grouped SCALAR expression whose left
+// operand merely opens with a subquery (`((SELECT 1) + 2)`), from an IN value
+// list (`((SELECT 1),(SELECT 2))`), and from a parenthesized join group
+// (`((SELECT 1) t JOIN u)`, `((((t...))))`). Used by the FROM / scalar / IN /
+// EXISTS gates.
+//
+// A SINGLE left-to-right linear pass, iterative (no recursion, no depth cap): a
+// deeply nested `((((SELECT 1))))` is classified in O(tokens), so the caller then
+// descends the derived-table path ONCE rather than re-running this predicate at
+// every nesting level. (The earlier recursive form re-scanned overlapping ranges
+// AND false-negatived past a 256 recursion cap, driving the FROM classifier into
+// per-level join-group recursion - an O(depth^3) parse-time DoS on legal input.)
+bool Parser::paren_group_starts_query(std::size_t from) const {
+    if (tokenizer_ == nullptr) {
+        return false;
     }
     const auto& tokens = tokenizer_->get_tokens();
     const std::size_t n = tokens.size();
     if (from >= n) {
-        return kNoQueryExpr;
+        return false;
     }
-    const auto is_setop = [&](std::size_t j) {
-        return j < n && tokens[j].type == tokenizer::TokenType::Keyword &&
-               (tokens[j].keyword_id == db25::Keyword::UNION ||
-                tokens[j].keyword_id == db25::Keyword::INTERSECT ||
-                tokens[j].keyword_id == db25::Keyword::EXCEPT);
-    };
     const auto is_open = [&](std::size_t j) {
         return tokens[j].type == tokenizer::TokenType::Delimiter &&
                tokens[j].value == "(";
@@ -510,125 +514,99 @@ std::size_t Parser::scan_query_expression(std::size_t from,
         return tokens[j].type == tokenizer::TokenType::Delimiter &&
                tokens[j].value == ")";
     };
-
-    std::size_t j;
-    const auto& head = tokens[from];
-    if (head.type == tokenizer::TokenType::Keyword &&
-        (head.keyword_id == db25::Keyword::SELECT ||
-         head.keyword_id == db25::Keyword::VALUES ||
-         head.keyword_id == db25::Keyword::WITH)) {
-        // Keyword-rooted primary: scan its body, which absorbs any operators /
-        // clauses, until - at this parenthesis level - we reach a set-operation
-        // keyword (the tail, folded below) or the enclosing ')' (or end of input).
-        int pd = 0;
-        j = from;
-        while (j < n) {
-            if (is_open(j)) {
-                ++pd;
-            } else if (is_close(j)) {
-                if (pd == 0) {
-                    break;  // the group's closing ')'
-                }
-                --pd;
-            } else if (pd == 0 && is_setop(j)) {
-                break;  // set-operation tail at this level
-            }
-            ++j;
+    const auto is_query_kw = [&](std::size_t j) {
+        if (tokens[j].type != tokenizer::TokenType::Keyword) {
+            return false;
         }
-    } else if (is_open(from)) {
-        // Parenthesized primary: it is a query primary only if its content is
-        // *itself* wholly a query expression - `(SELECT 1)`, `((SELECT 1) UNION
-        // ...)` - not a scalar expression that opens with a subquery.
-        //
-        // Cheap pre-check first: skip the run of leading '(' and require the
-        // innermost token to be a query keyword. A deeply nested join group,
-        // `((((t ...))))`, or a value list bails here in O(leading-parens) - WITHOUT
-        // the O(n) balanced scan below - so the FROM classifier stays linear per
-        // level instead of O(depth^2) over a `FROM ((((...))))` stress input.
-        std::size_t inner = from;
-        while (inner < n && is_open(inner)) {
-            ++inner;
-        }
-        if (inner >= n || tokens[inner].type != tokenizer::TokenType::Keyword) {
-            return kNoQueryExpr;
-        }
-        const auto kw = tokens[inner].keyword_id;
-        if (kw != db25::Keyword::SELECT && kw != db25::Keyword::VALUES &&
-            kw != db25::Keyword::WITH) {
-            return kNoQueryExpr;
-        }
-        // The innermost token is a query keyword: only now pay for the balanced
-        // scan that verifies the content fills the parens exactly as a query.
-        int pd = 0;
-        std::size_t close = kNoQueryExpr;
-        for (std::size_t k = from; k < n; ++k) {
-            if (is_open(k)) {
-                ++pd;
-            } else if (is_close(k)) {
-                if (--pd == 0) {
-                    close = k;
-                    break;
-                }
-            }
-        }
-        if (close == kNoQueryExpr) {
-            return kNoQueryExpr;  // unbalanced
-        }
-        if (scan_query_expression(from + 1, depth + 1) != close) {
-            return kNoQueryExpr;  // content does not fill the parens as a query
-        }
-        j = close + 1;
-    } else {
-        return kNoQueryExpr;  // not a query primary (identifier, literal, operator)
-    }
-
-    // Left-associative set-operation tail: { (UNION|INTERSECT|EXCEPT) [ALL|DISTINCT]
-    // <query primary> }. Each right operand must itself be a query expression.
-    while (is_setop(j)) {
-        ++j;  // set-operation keyword
-        if (j < n && tokens[j].type == tokenizer::TokenType::Keyword &&
-            (tokens[j].keyword_id == db25::Keyword::ALL ||
-             tokens[j].keyword_id == db25::Keyword::DISTINCT)) {
-            ++j;
-        }
-        const std::size_t rhs = scan_query_expression(j, depth + 1);
-        if (rhs == kNoQueryExpr) {
-            return kNoQueryExpr;
-        }
-        j = rhs;
-    }
-    return j;
-}
-
-bool Parser::paren_group_starts_query(std::size_t from) const {
-    if (tokenizer_ == nullptr) {
-        return false;
-    }
-    const auto& tokens = tokenizer_->get_tokens();
-    // Fast path (and O(1), so deeply-nested `(SELECT * FROM (SELECT * FROM (...)))`
-    // stays linear overall rather than O(depth^2)): content that opens directly
-    // with a query keyword IS a query body - nothing can precede a SELECT / VALUES
-    // / WITH inside its parens to make it a mere operand. Only a leading '(' is
-    // ambiguous (a parenthesized subquery may be a query body OR the left operand
-    // of a scalar expression), and only that case needs the balanced scan below.
-    if (from < tokens.size() && tokens[from].type == tokenizer::TokenType::Keyword) {
-        const auto k = tokens[from].keyword_id;
+        const auto k = tokens[j].keyword_id;
         return k == db25::Keyword::SELECT || k == db25::Keyword::VALUES ||
                k == db25::Keyword::WITH;
+    };
+    const auto is_setop = [&](std::size_t j) {
+        if (tokens[j].type != tokenizer::TokenType::Keyword) {
+            return false;
+        }
+        const auto k = tokens[j].keyword_id;
+        return k == db25::Keyword::UNION || k == db25::Keyword::INTERSECT ||
+               k == db25::Keyword::EXCEPT;
+    };
+
+    // Fast path: content opening directly with a query keyword IS a query body -
+    // nothing can precede a SELECT / VALUES / WITH inside its parens to make it a
+    // mere operand (an unclosed one is still routed to the subquery parser, which
+    // reports the missing ')').
+    if (is_query_kw(from)) {
+        return true;
     }
-    const std::size_t end = scan_query_expression(from, 0);
-    if (end == kNoQueryExpr) {
-        return false;
+
+    // `depth` counts parenthesized-primary wrappers still open. A keyword primary's
+    // OWN body parens are balanced locally (body_depth) and don't affect `depth`.
+    std::size_t i = from;
+    std::size_t depth = 0;
+    bool expect_primary = true;
+    bool saw_query = false;
+    while (i < n) {
+        if (expect_primary) {
+            if (is_open(i)) {
+                ++depth;  // open a nested parenthesized primary
+                ++i;
+                continue;
+            }
+            if (is_query_kw(i)) {
+                // Keyword-rooted primary: skip its body until, at this level, a
+                // set-op keyword or a ')' that belongs to an enclosing wrapper.
+                saw_query = true;
+                expect_primary = false;
+                ++i;
+                std::size_t body_depth = 0;
+                while (i < n) {
+                    if (is_open(i)) {
+                        ++body_depth;
+                        ++i;
+                    } else if (is_close(i)) {
+                        if (body_depth == 0) {
+                            break;  // ')' of an enclosing wrapper
+                        }
+                        --body_depth;
+                        ++i;
+                    } else if (body_depth == 0 && is_setop(i)) {
+                        break;  // set-op tail at this level
+                    } else {
+                        ++i;
+                    }
+                }
+                continue;
+            }
+            return false;  // expected a primary, got a non-query token (identifier,
+                           // literal, operator) - a join group / list / scalar expr
+        }
+        // After a primary: close wrappers, fold a set-op tail, or hit the boundary.
+        if (is_close(i)) {
+            if (depth == 0) {
+                return true;  // the enclosing group's ')': the whole content parsed
+                              // as a query expression
+            }
+            --depth;
+            ++i;
+            continue;
+        }
+        if (is_setop(i)) {
+            ++i;
+            if (i < n && tokens[i].type == tokenizer::TokenType::Keyword &&
+                (tokens[i].keyword_id == db25::Keyword::ALL ||
+                 tokens[i].keyword_id == db25::Keyword::DISTINCT)) {
+                ++i;
+            }
+            expect_primary = true;
+            continue;
+        }
+        return false;  // a trailing scalar operator (`(SELECT 1) + 2`) or a table
+                       // ref (`(SELECT 1) t JOIN ...`): not a query body
     }
-    // The content is a query *body* only when the query expression consumes the
-    // whole group - it ends at the enclosing ')', or it runs to end-of-input (an
-    // *unclosed* query body: still route it to the subquery parser so the missing
-    // ')' is reported, matching the pre-existing lenient error path). A trailing
-    // scalar operator, as in `(SELECT 1) + 2`, leaves `end` at the operator, so
-    // the group is a grouped expression (or value list), not a subquery.
-    return end == tokens.size() ||
-           (tokens[end].type == tokenizer::TokenType::Delimiter &&
-            tokens[end].value == ")");
+    // Ran to end of input with no disqualifying token: an UNCLOSED but query-shaped
+    // group. Route it to the subquery parser (which reports the missing ')'),
+    // matching the pre-existing lenient path.
+    return saw_query;
 }
 
 bool Parser::at_query_block_start() const {
