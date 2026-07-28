@@ -711,3 +711,65 @@ TEST_F(PrecedenceRegressionTest, ParenLedQueryBodyEveryContextMatrix) {
             << "the (x) column-alias list must be retained";
     }
 }
+
+// The dual of the matrix above: a parenthesized group whose LEFT operand merely
+// happens to be a parenthesized subquery - `((SELECT 1) + 2)` - is a grouped
+// SCALAR expression, not a query body. The leading-'(' query-body recognizer must
+// not swallow the whole group as a subquery and strand the trailing operator
+// (which produced a spurious 'Unclosed parenthesis' at every gate: scalar, IN,
+// EXISTS, FROM). Each of these is legal SQL (PostgreSQL: SELECT ((SELECT 1)+2)=3).
+TEST_F(PrecedenceRegressionTest, ParenSubqueryLeftOperandStaysScalarExpr) {
+    // Binary-operator forms: the projection is a BinaryExpr with the subquery as
+    // one operand, never a bare Subquery/UnionStmt that ate the whole group.
+    const char* binary_queries[] = {
+        "SELECT ((SELECT 1) + 2) FROM z",
+        "SELECT ((SELECT max(a) FROM t) * 2) FROM z",
+        "SELECT ((SELECT 1) = 2) FROM z",
+    };
+    for (const char* sql : binary_queries) {
+        ASTNode* root = parse(sql);
+        ASSERT_NE(root, nullptr) << "rejected a legal grouped scalar expression: " << sql;
+        ASTNode* proj = first_projection(root);
+        ASSERT_NE(proj, nullptr) << sql;
+        EXPECT_EQ(proj->node_type, NodeType::BinaryExpr)
+            << sql << " -> the grouped scalar expression was mis-parsed as a query body";
+        EXPECT_NE(find(root, NodeType::Subquery), nullptr)
+            << sql << " -> the subquery operand was lost";
+    }
+    // All grouped-scalar forms (including the postfix `IS NULL`) must parse and the
+    // projection must NOT be swallowed as a query body - it is neither a bare
+    // Subquery nor a set-operation node at the projection root.
+    const char* scalar_queries[] = {
+        "SELECT ((SELECT 1) + 2) FROM z",
+        "SELECT ((SELECT 1) = 2) FROM z",
+        "SELECT ((SELECT 1) IS NULL) FROM z",
+    };
+    for (const char* sql : scalar_queries) {
+        ASTNode* root = parse(sql);
+        ASSERT_NE(root, nullptr) << "rejected a legal grouped scalar expression: " << sql;
+        ASTNode* proj = first_projection(root);
+        ASSERT_NE(proj, nullptr) << sql;
+        EXPECT_NE(proj->node_type, NodeType::Subquery)
+            << sql << " -> the group was mis-parsed as a bare subquery";
+        EXPECT_EQ(find(proj, NodeType::UnionStmt), nullptr)
+            << sql << " -> the group was mis-parsed as a set-operation query body";
+        EXPECT_NE(find(root, NodeType::Subquery), nullptr)
+            << sql << " -> the subquery operand was lost";
+    }
+    // Same misfire reached the IN and FROM/derived gates; both must accept these.
+    EXPECT_NE(parse("SELECT * FROM z WHERE x IN ((SELECT 1) + 2)"), nullptr)
+        << "IN gate rejected `IN ((SELECT 1) + 2)`";
+    EXPECT_NE(parse("SELECT * FROM z WHERE EXISTS ((SELECT 1) + 2)"), nullptr)
+        << "EXISTS gate rejected `EXISTS ((SELECT 1) + 2)`";
+    // A parenthesized FROM join group whose first ref is itself a derived table
+    // must still be a join group, not swallowed as one big derived table.
+    {
+        ASTNode* root = parse("SELECT * FROM ((SELECT 1) t1 JOIN u ON t1.a = u.a)");
+        ASSERT_NE(root, nullptr) << "((SELECT 1) t1 JOIN u ...) join group rejected";
+    }
+    // And the intended #60 query bodies must still be recognized (no over-correction).
+    EXPECT_NE(find(parse("SELECT ((SELECT 1) UNION (SELECT 2)) FROM z"), NodeType::UnionStmt), nullptr)
+        << "over-corrected: a real parenthesized set-op body is no longer a query body";
+    EXPECT_NE(find(parse("SELECT * FROM ((SELECT 1) UNION (SELECT 2)) t"), NodeType::UnionStmt), nullptr)
+        << "over-corrected: a real parenthesized set-op derived table is no longer a query body";
+}

@@ -239,11 +239,22 @@ protected:
     // a grouped expression. Distinguishes a subquery from a grouped expression in
     // expression context and a derived table from a join group in FROM.
     [[nodiscard]] bool at_query_block_start() const;
-    // Starting at token index `from`, skip consecutive '(' and report whether the
-    // first non-'(' token begins a query (SELECT / VALUES / WITH). Lets the FROM /
-    // scalar / IN gates recognize a parenthesized query body that starts with '('
-    // (a set operation over parenthesized branches) rather than a keyword.
+    // Report whether the parenthesized group whose content begins at token index
+    // `from` is a query body: a query expression (SELECT / VALUES / WITH, possibly
+    // parenthesized and/or joined by set operations) that fills the group exactly.
+    // Distinguishes a parenthesized query body - `(SELECT 1)`, `((SELECT 1))`,
+    // `((SELECT 1) UNION (SELECT 2))` - from a grouped scalar expression whose left
+    // operand merely happens to be a parenthesized subquery, `((SELECT 1) + 2)`,
+    // and from a value list / join group. Used by the FROM / scalar / IN gates.
     [[nodiscard]] bool paren_group_starts_query(std::size_t from) const;
+    // Return the token index one past a maximal query expression starting at
+    // `from`, or kNoQueryExpr if `from` does not begin one. A query expression is a
+    // query primary (SELECT / VALUES / WITH, or a parenthesized query expression
+    // that fills its parens exactly) followed by an optional left-associative
+    // set-operation tail. `depth` bounds pathological `(((...)))` nesting.
+    static constexpr std::size_t kNoQueryExpr = static_cast<std::size_t>(-1);
+    [[nodiscard]] std::size_t scan_query_expression(std::size_t from,
+                                                    std::size_t depth) const;
     // Fold a set-operation tail (UNION/INTERSECT/EXCEPT/MINUS, two precedence
     // levels, left-associative) onto an already-parsed first operand, then bind a
     // trailing ORDER BY / LIMIT to the whole result. Returns the folded node (the
