@@ -247,14 +247,6 @@ protected:
     // operand merely happens to be a parenthesized subquery, `((SELECT 1) + 2)`,
     // and from a value list / join group. Used by the FROM / scalar / IN gates.
     [[nodiscard]] bool paren_group_starts_query(std::size_t from) const;
-    // Return the token index one past a maximal query expression starting at
-    // `from`, or kNoQueryExpr if `from` does not begin one. A query expression is a
-    // query primary (SELECT / VALUES / WITH, or a parenthesized query expression
-    // that fills its parens exactly) followed by an optional left-associative
-    // set-operation tail. `depth` bounds pathological `(((...)))` nesting.
-    static constexpr std::size_t kNoQueryExpr = static_cast<std::size_t>(-1);
-    [[nodiscard]] std::size_t scan_query_expression(std::size_t from,
-                                                    std::size_t depth) const;
     // Fold a set-operation tail (UNION/INTERSECT/EXCEPT/MINUS, two precedence
     // levels, left-associative) onto an already-parsed first operand, then bind a
     // trailing ORDER BY / LIMIT to the whole result. Returns the folded node (the

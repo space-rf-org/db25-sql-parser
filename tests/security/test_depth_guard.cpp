@@ -11,6 +11,7 @@
 
 #include <string>
 #include <sstream>
+#include <chrono>
 
 #include <gtest/gtest.h>
 
@@ -239,4 +240,38 @@ TEST(DepthGuard, ParserReusableAfterDepthFailure) {
     ASSERT_TRUE(ok.has_value())
         << "Parser must be reusable after a depth failure, got: "
         << ok.error().message;
+}
+
+// A run of nested parentheses around a query body at the FROM / IN / scalar /
+// EXISTS gates must be classified and parsed in ~LINEAR time. The query-body
+// gate predicate (paren_group_starts_query) once ran a recursive balanced scan
+// re-invoked at every nesting level - an O(depth^3) parse-time DoS on inputs the
+// parser accepts (below max_depth): FROM depth 800 took ~6.5s. It is now a single
+// linear pass. A few hundred nested parens must parse in milliseconds; the very
+// generous wall-clock ceiling here (seconds) exists only to fail loudly if the
+// super-linear blowup ever returns, without being flaky under CI load.
+TEST(DepthGuard, NestedParenQueryBodyParsesInLinearTime) {
+    const auto within = [](const std::string& sql, bool expect_ok) {
+        Parser parser;
+        const auto t0 = std::chrono::steady_clock::now();
+        auto result = parser.parse(sql);
+        const double sec =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        EXPECT_EQ(result.has_value(), expect_ok) << sql.substr(0, 40);
+        // Pre-fix: ~6.5s at depth 800, ~29s at 1600. Post-fix: sub-millisecond.
+        EXPECT_LT(sec, 2.0) << "super-linear parse-time regression: " << sec << "s";
+    };
+    // depth 300 is well below max_depth (1000): these parse successfully.
+    within("SELECT * FROM " + std::string(300, '(') + "SELECT 1" + std::string(300, ')'),
+           true);
+    within("SELECT x FROM t WHERE x IN " + std::string(300, '(') + "SELECT 1" +
+               std::string(300, ')'),
+           true);
+    within("SELECT " + std::string(300, '(') + "SELECT 1" + std::string(300, ')') +
+               " FROM t",
+           true);
+    // depth 3000 exceeds max_depth: must be rejected gracefully - and, crucially,
+    // FAST (pre-fix this depth effectively hung).
+    within("SELECT * FROM " + std::string(3000, '(') + "SELECT 1" + std::string(3000, ')'),
+           false);
 }
