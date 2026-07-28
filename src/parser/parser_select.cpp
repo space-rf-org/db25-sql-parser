@@ -2735,51 +2735,16 @@ bool Parser::validate_select_stmt(ast::ASTNode* select_stmt) {
     return true;
 }
 
-bool Parser::validate_clause_dependencies(ast::ASTNode* select_stmt) {
-    bool has_from = false;
-    bool has_where = false;
-    bool has_group_by = false;
-    bool has_having = false;
-    bool has_order_by = false;
-    
-    // Scan all clauses
-    ast::ASTNode* child = select_stmt->first_child;
-    while (child) {
-        switch (child->node_type) {
-            case ast::NodeType::FromClause:
-                has_from = true;
-                break;
-            case ast::NodeType::WhereClause:
-                has_where = true;
-                break;
-            case ast::NodeType::GroupByClause:
-                has_group_by = true;
-                break;
-            case ast::NodeType::HavingClause:
-                has_having = true;
-                break;
-            case ast::NodeType::OrderByClause:
-                has_order_by = true;
-                break;
-            default:
-                break;
-        }
-        child = child->next_sibling;
-    }
-    
-    // Validate dependencies
-    // WHERE, GROUP BY, HAVING, ORDER BY all require FROM
-    if ((has_where || has_group_by || has_having || has_order_by) && !has_from) {
-        return false;  // These clauses require FROM
-    }
-    
-    // HAVING without GROUP BY is semantically questionable but syntactically valid
-    // Some databases allow it (treats whole result as one group)
-    // So we don't enforce this dependency at parse time
-    // if (has_having && !has_group_by) {
-    //     return false;
-    // }
-    
+bool Parser::validate_clause_dependencies(ast::ASTNode* /*select_stmt*/) {
+    // No clause-dependency rule is enforced at parse time. In particular a
+    // FROM-less SELECT bearing WHERE / GROUP BY / HAVING / ORDER BY is valid SQL
+    // (`SELECT 1 ORDER BY 1`, `SELECT 1 WHERE 1=1`, `SELECT 1 GROUP BY 1`,
+    // `SELECT 1 HAVING 1=1` all run in PostgreSQL / MySQL / SQLite / DuckDB), and
+    // the parser already accepts bare `SELECT 1`, `SELECT 1 LIMIT 5`, and the same
+    // FROM-less ORDER BY through the set-op path (`... UNION ... ORDER BY 1`).
+    // Requiring FROM for those clauses was both non-standard and internally
+    // inconsistent. Semantic dependencies (e.g. HAVING/ORDER BY column legality)
+    // belong to the analyzer, not the syntactic parser.
     return true;
 }
 

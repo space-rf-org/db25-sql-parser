@@ -72,7 +72,18 @@ int main() {
         
         // UNION
         {"UNION", "SELECT id FROM users UNION SELECT id FROM customers", true},
-        {"UNION ALL", "SELECT id FROM users UNION ALL SELECT id FROM customers", true}
+        {"UNION ALL", "SELECT id FROM users UNION ALL SELECT id FROM customers", true},
+
+        // FROM-less SELECT with WHERE / GROUP BY / HAVING / ORDER BY: legal SQL,
+        // must NOT be rejected (validate_clause_dependencies used to require FROM
+        // for these clauses, inconsistently with bare SELECT and the set-op path).
+        {"FROM-less ORDER BY", "SELECT 1 ORDER BY 1", true},
+        {"FROM-less ORDER BY alias", "SELECT 1+1 AS x ORDER BY x", true},
+        {"FROM-less WHERE", "SELECT 1 WHERE 1 = 1", true},
+        {"FROM-less GROUP BY", "SELECT 1 GROUP BY 1", true},
+        {"FROM-less HAVING", "SELECT 1 HAVING 1 = 1", true},
+        {"FROM-less bare SELECT", "SELECT 1", true},
+        {"FROM-less SELECT LIMIT", "SELECT 1 LIMIT 5", true}
     };
     
     Parser parser;
