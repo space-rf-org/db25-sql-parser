@@ -771,10 +771,16 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
                 break;  // not INTERSECT: hand back to the union level
             }
             advance(); // consume INTERSECT
+            // Consume the optional set-quantifier. ALL keeps duplicates;
+            // DISTINCT is the default de-duplicating form and a no-op here.
+            // Both must be consumed or parse_setop_operand() sees the keyword,
+            // returns nullptr, and the RHS arm is silently dropped -- matching
+            // the ALL||DISTINCT the query-body classifier already accepts.
             bool all = false;
             if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-                (current_token_->keyword_id == db25::Keyword::ALL)) {
-                all = true;
+                (current_token_->keyword_id == db25::Keyword::ALL ||
+                 current_token_->keyword_id == db25::Keyword::DISTINCT)) {
+                all = (current_token_->keyword_id == db25::Keyword::ALL);
                 advance();
             }
             ast::ASTNode* right = parse_setop_operand();
@@ -807,10 +813,16 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
 
         advance(); // consume set operation keyword
 
+        // Consume the optional set-quantifier. ALL keeps duplicates; DISTINCT
+        // is the default de-duplicating form and a no-op here. Both must be
+        // consumed or parse_setop_operand() sees the keyword, returns nullptr,
+        // and the RHS arm (and every following operator) is silently dropped --
+        // matching the ALL||DISTINCT the query-body classifier already accepts.
         bool all = false;
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-            (current_token_->keyword_id == db25::Keyword::ALL)) {
-            all = true;
+            (current_token_->keyword_id == db25::Keyword::ALL ||
+             current_token_->keyword_id == db25::Keyword::DISTINCT)) {
+            all = (current_token_->keyword_id == db25::Keyword::ALL);
             advance();
         }
 

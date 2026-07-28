@@ -193,6 +193,47 @@ TEST_F(ParserFixesPhase1Test, UnionAllVsUnion) {
         << "UNION ALL should have ALL flag";
 }
 
+// Test 4b: explicit DISTINCT set-quantifier must not drop the RHS arm.
+// Regression: the fold loops consumed only ALL, so `UNION DISTINCT` left the
+// DISTINCT keyword in the token stream; parse_setop_operand() then failed and
+// the whole right arm (plus any following operator) was silently discarded,
+// collapsing the query to a bare SelectStmt with no diagnostic.
+TEST_F(ParserFixesPhase1Test, SetOpExplicitDistinctModifier) {
+    struct Case { const char* sql; NodeType op; };
+    const Case cases[] = {
+        {"SELECT 1 UNION DISTINCT SELECT 2",     NodeType::UnionStmt},
+        {"SELECT 1 INTERSECT DISTINCT SELECT 2", NodeType::IntersectStmt},
+        {"SELECT 1 EXCEPT DISTINCT SELECT 2",    NodeType::ExceptStmt},
+        {"(SELECT 1) UNION DISTINCT (SELECT 2)", NodeType::UnionStmt},
+    };
+    for (const auto& c : cases) {
+        parser.reset();
+        auto result = parser.parse(c.sql);
+        ASSERT_TRUE(result.has_value()) << "Failed to parse: " << c.sql;
+
+        // The set-op node must be the root: a collapse to SelectStmt is the bug.
+        auto* root = result.value();
+        ASSERT_EQ(root->node_type, c.op)
+            << "Explicit DISTINCT dropped the set operation: " << c.sql;
+
+        // Both operands must survive.
+        int operands = 0;
+        for (auto* k = root->first_child; k; k = k->next_sibling) ++operands;
+        EXPECT_EQ(operands, 2) << "RHS arm dropped for: " << c.sql;
+
+        // DISTINCT is the default de-duplicating form: no ALL flag.
+        EXPECT_FALSE(has_flag(root->flags, NodeFlags::All))
+            << "DISTINCT must not set the ALL flag: " << c.sql;
+    }
+
+    // A chained `... DISTINCT ... UNION ...` must keep every arm (left-assoc).
+    parser.reset();
+    auto chained = parser.parse("SELECT 1 UNION DISTINCT SELECT 2 UNION SELECT 3");
+    ASSERT_TRUE(chained.has_value());
+    EXPECT_EQ(chained.value()->node_type, NodeType::UnionStmt)
+        << "Chained DISTINCT set-op lost an arm";
+}
+
 // Test 5: ORDER BY DESC vs ASC
 TEST_F(ParserFixesPhase1Test, OrderByDirection) {
     std::string sql = R"(
