@@ -53,8 +53,14 @@ std::vector<EdgeCase> edge_cases = {
     {"ALL/ANY operators",
      "SELECT * FROM products WHERE price > ALL (SELECT price FROM discounted)", true},
     
+    // A FROM-less SELECT bearing WHERE (or GROUP BY / HAVING / ORDER BY) is
+    // SYNTACTICALLY well-formed - the parser no longer requires FROM for those
+    // clauses (`SELECT 1 WHERE 1=1` is legal SQL). That `SELECT *` has nothing to
+    // expand and `id` resolves to no relation are SEMANTIC errors the analyzer
+    // raises, not the syntactic parser.
+    {"FROM-less WHERE parses", "SELECT * WHERE id = 1", true},
+
     // Should fail
-    {"Missing FROM", "SELECT * WHERE id = 1", false},
     {"Invalid JOIN", "SELECT * FROM t1 JOIN ON t1.id = t2.id", false},
     {"Unclosed parenthesis", "SELECT * FROM (SELECT * FROM users", false},
     {"Invalid operator", "SELECT * FROM users WHERE id === 1", false},
