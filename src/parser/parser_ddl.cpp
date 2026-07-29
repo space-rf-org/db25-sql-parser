@@ -978,16 +978,42 @@ ast::ASTNode* Parser::parse_create_table_impl() {
             parenthesis_depth_--;
         }
     }
-    
+
+    // CREATE TABLE ... AS <query> (CTAS): the table is defined by the result of a
+    // query. Parse the query body and attach it as a child, exactly like
+    // CREATE VIEW ... AS. Without this the table-options loop below swallowed and
+    // discarded the whole SELECT, producing a childless CreateTableStmt with a
+    // (misleading) parse success - silent loss of the query body.
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::AS) {
+        advance();  // consume AS
+        // The body is any query expression (SELECT, set operation, WITH, or
+        // VALUES); dispatch through the shared query-body parser.
+        if (ast::ASTNode* body = parse_query_body()) {
+            body->parent = create_node;
+            // A column-name list may precede AS in standard CTAS; append the body
+            // after any such children rather than overwriting them.
+            if (create_node->first_child == nullptr) {
+                create_node->first_child = body;
+            } else {
+                ast::ASTNode* last = create_node->first_child;
+                while (last->next_sibling != nullptr) {
+                    last = last->next_sibling;
+                }
+                last->next_sibling = body;
+            }
+            create_node->child_count++;
+        }
+    }
+
     // Parse table options (e.g., WITHOUT ROWID, engine options, etc.)
-    while (current_token_ && 
+    while (current_token_ &&
            current_token_->type != tokenizer::TokenType::EndOfFile &&
            current_token_->value != ";") {
         // For now, just consume remaining tokens
         // TODO: Parse specific table options
         advance();
     }
-    
+
     return create_node;
 }
 

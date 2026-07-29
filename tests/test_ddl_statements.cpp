@@ -272,6 +272,48 @@ TEST_F(DDLTest, CreateTableIfNotExists) {
     EXPECT_TRUE(ast->semantic_flags & 0x01);  // IF NOT EXISTS flag
 }
 
+// Find the first descendant (pre-order, including the root) of a node type.
+static ASTNode* find_node_type(ASTNode* n, NodeType nt) {
+    if (!n) return nullptr;
+    if (n->node_type == nt) return n;
+    for (auto* c = n->first_child; c; c = c->next_sibling) {
+        if (auto* h = find_node_type(c, nt)) return h;
+    }
+    return nullptr;
+}
+
+// CREATE TABLE ... AS SELECT (CTAS) must attach the query body as a child, not
+// silently discard it. Regression: the table-options loop swallowed the whole
+// `AS SELECT ...`, producing a childless CreateTableStmt with parse success.
+TEST_F(DDLTest, CreateTableAsSelectAttachesQueryBody) {
+    auto* ast = parse("CREATE TABLE t AS SELECT a, b FROM u WHERE x > 0");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::CreateTableStmt);
+    EXPECT_EQ(ast->primary_text, "t");
+    EXPECT_GE(ast->child_count, 1u) << "CTAS must have a query-body child";
+    auto* body = find_node_type(ast, NodeType::SelectStmt);
+    ASSERT_NE(body, nullptr) << "the AS SELECT body must be attached, not dropped";
+}
+
+// A set-operation body (CTAS over a UNION) is likewise attached.
+TEST_F(DDLTest, CreateTableAsSetOperation) {
+    auto* ast = parse("CREATE TABLE t AS SELECT 1 UNION ALL SELECT 2");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::CreateTableStmt);
+    ASSERT_NE(find_node_type(ast, NodeType::UnionStmt), nullptr)
+        << "the UNION body must be attached";
+}
+
+// A plain CREATE TABLE (no AS) is unaffected: it keeps its column-definition
+// children and has no query body.
+TEST_F(DDLTest, CreateTablePlainHasNoQueryBody) {
+    auto* ast = parse("CREATE TABLE t (id INTEGER, name TEXT)");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(ast->node_type, NodeType::CreateTableStmt);
+    EXPECT_EQ(find_node_type(ast, NodeType::SelectStmt), nullptr);
+    EXPECT_GE(ast->child_count, 2u) << "two column definitions";
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
