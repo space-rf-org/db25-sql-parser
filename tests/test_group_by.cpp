@@ -292,3 +292,48 @@ TEST_F(GroupByTest, GroupingSetListRejected) {
     ASSERT_NE(gb2, nullptr);
     EXPECT_EQ(gb2->child_count, 2);
 }
+
+// ROLLUP / CUBE / GROUPING (and SETS) are NON-RESERVED keywords: they introduce a
+// grouping construct only when ROLLUP/CUBE is immediately followed by '(' or
+// GROUPING by SETS. Used as a plain column identifier they must parse as an
+// ordinary column reference. Regression: the GROUP BY branches dispatched on the
+// bare keyword value with no lookahead, so `GROUP BY rollup` produced an empty
+// ROLLUP grouping element (or dropped the whole clause), and `GROUP BY rollup, x`
+// was wrongly rejected once the grouping-set-list guard was added.
+TEST_F(GroupByTest, GroupingKeywordAsColumnName) {
+    // A single keyword-named column groups by that column.
+    for (const char* sql : {"SELECT rollup FROM t GROUP BY rollup",
+                            "SELECT cube FROM t GROUP BY cube",
+                            "SELECT g FROM t GROUP BY grouping"}) {
+        auto* ast = parse(sql);
+        ASSERT_NE(ast, nullptr) << sql;
+        auto* gb = find_node_by_type(ast, NodeType::GroupByClause);
+        ASSERT_NE(gb, nullptr) << sql;
+        EXPECT_EQ(gb->child_count, 1) << sql;
+        ASSERT_NE(gb->first_child, nullptr) << sql;
+        EXPECT_NE(gb->first_child->node_type, NodeType::GroupingElement) << sql;
+    }
+
+    // A keyword-named column mixed with others is an ordinary multi-column list,
+    // in either position.
+    auto* first = parse("SELECT rollup, x FROM t GROUP BY rollup, x");
+    ASSERT_NE(first, nullptr);
+    auto* gbf = find_node_by_type(first, NodeType::GroupByClause);
+    ASSERT_NE(gbf, nullptr);
+    EXPECT_EQ(gbf->child_count, 2);
+
+    auto* last = parse("SELECT x FROM t GROUP BY x, rollup");
+    ASSERT_NE(last, nullptr);
+    auto* gbl = find_node_by_type(last, NodeType::GroupByClause);
+    ASSERT_NE(gbl, nullptr);
+    EXPECT_EQ(gbl->child_count, 2);
+
+    // `GROUP BY rollup + 1` is an expression over the column, not a grouping set.
+    auto* expr = parse("SELECT a FROM t GROUP BY rollup + 1");
+    ASSERT_NE(expr, nullptr);
+    auto* gbe = find_node_by_type(expr, NodeType::GroupByClause);
+    ASSERT_NE(gbe, nullptr);
+    EXPECT_EQ(gbe->child_count, 1);
+    ASSERT_NE(gbe->first_child, nullptr);
+    EXPECT_NE(gbe->first_child->node_type, NodeType::GroupingElement);
+}
