@@ -113,6 +113,31 @@ TEST_F(DMLParseTest, DeleteWhereClause) {
     EXPECT_EQ(where->first_child->child_count, 2u);
 }
 
+// A SET assignment target must be a bare column name. The parenthesized SQL
+// row-assignment form `SET (a, b) = (1, 2)` is not supported; it must be
+// REJECTED cleanly, never silently parsed as an UpdateStmt with an empty SET and
+// every following clause (WHERE / FROM / RETURNING) dropped. Regression: the SET
+// loop broke on the leading '(' without advancing, so the WHERE filter vanished
+// with no diagnostic - an UPDATE that would touch every row.
+TEST_F(DMLParseTest, UpdateParenthesizedRowAssignmentRejected) {
+    EXPECT_EQ(parse("UPDATE t SET (a, b) = (1, 2) WHERE id = 1"), nullptr);
+    EXPECT_EQ(parse("UPDATE t SET (a, b) = (1, 2)"), nullptr);
+    // A partial parenthesized target after a valid one is rejected too (it must
+    // not silently keep only the first assignment and drop the rest + WHERE).
+    EXPECT_EQ(parse("UPDATE t SET a = 1, (b, c) = (2, 3) WHERE id = 1"), nullptr);
+    // A target with no '=' is likewise malformed, not a silent empty SET.
+    EXPECT_EQ(parse("UPDATE t SET a b WHERE id = 1"), nullptr);
+
+    // The ordinary column-assignment forms still parse, WHERE intact.
+    auto* ok = parse("UPDATE t SET a = 1, b = 2 WHERE id = 1");
+    ASSERT_NE(ok, nullptr);
+    EXPECT_EQ(ok->node_type, NodeType::UpdateStmt);
+    auto* set = find_child(ok, NodeType::SetClause);
+    ASSERT_NE(set, nullptr);
+    EXPECT_EQ(set->child_count, 2u);
+    ASSERT_NE(find_child(ok, NodeType::WhereClause), nullptr);
+}
+
 // ============================================================================
 // LIMIT negative operand
 // ============================================================================
