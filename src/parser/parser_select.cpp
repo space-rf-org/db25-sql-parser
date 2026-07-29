@@ -389,7 +389,18 @@ ast::ASTNode* Parser::parse_select_stmt() {
             advance(); // consume BY
             
             auto* group_by = parse_group_by_clause();
-            if (group_by) {
+            if (!group_by) {
+                // parse_group_by_clause returns null in two cases. If it recorded a
+                // hard error (an unsupported comma-separated ROLLUP/CUBE/GROUPING
+                // SETS list), fail the whole parse rather than silently continue as
+                // if the GROUP BY were absent - which would drop the grouping and
+                // mis-execute the query. Otherwise the item was simply
+                // missing/empty (`... GROUP BY` with nothing after): stay lenient
+                // and continue without a grouping clause, as before.
+                if (has_error_) {
+                    return nullptr;
+                }
+            } else {
                 group_by->parent = select_node;
                 // Add to the end of child list
                 auto* last_child = select_node->first_child;
@@ -1279,7 +1290,16 @@ ast::ASTNode* Parser::parse_group_by_clause() {
                     parenthesis_depth_--;
                 }
             }
-            
+
+            // A comma here starts a comma-separated list of grouping elements
+            // (`GROUPING SETS (...), b`). The loop below is never reached from this
+            // branch, so every following item would be silently dropped. Reject
+            // the unsupported list cleanly instead of mis-grouping the query.
+            if (current_token_ && current_token_->value == ",") {
+                error("comma-separated ROLLUP/CUBE/GROUPING SETS grouping lists are not supported");
+                pop_context();
+                return nullptr;
+            }
             pop_context();
             return group_node;
         }
@@ -1329,7 +1349,15 @@ ast::ASTNode* Parser::parse_group_by_clause() {
                 parenthesis_depth_--;
             }
         }
-        
+
+        // A comma-separated list of grouping elements (`CUBE(a), ...`) is
+        // unsupported and the item loop is unreachable from here; reject cleanly
+        // rather than silently drop every following item.
+        if (current_token_ && current_token_->value == ",") {
+            error("comma-separated ROLLUP/CUBE/GROUPING SETS grouping lists are not supported");
+            pop_context();
+            return nullptr;
+        }
         pop_context();
         return group_node;
     } else if (current_token_ && (current_token_->value == "ROLLUP" || current_token_->value == "rollup")) {  // TODO: Add ROLLUP to keywords
@@ -1378,11 +1406,19 @@ ast::ASTNode* Parser::parse_group_by_clause() {
                 parenthesis_depth_--;
             }
         }
-        
+
+        // A comma-separated list of grouping elements (`ROLLUP(a), b`) is
+        // unsupported and the item loop is unreachable from here; reject cleanly
+        // rather than silently drop every following item.
+        if (current_token_ && current_token_->value == ",") {
+            error("comma-separated ROLLUP/CUBE/GROUPING SETS grouping lists are not supported");
+            pop_context();
+            return nullptr;
+        }
         pop_context();
         return group_node;
     }
-    
+
     // Regular GROUP BY items
     // Parse first GROUP BY item
     ast::ASTNode* first_item = nullptr;
@@ -1419,7 +1455,24 @@ ast::ASTNode* Parser::parse_group_by_clause() {
     while (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
            current_token_->value == ",") {
         advance(); // consume comma
-        
+
+        // A ROLLUP / CUBE / GROUPING SETS element is only recognized as the FIRST
+        // group-by item (handled by the branches above). Appearing later in the
+        // list it would be mis-parsed by parse_expression as an ordinary function
+        // call named ROLLUP/CUBE. A comma-separated list of grouping elements is
+        // legal SQL but unsupported here (the analyzer/binder do not model it), so
+        // reject the statement cleanly rather than mis-represent it - matching the
+        // parser's handling of other unsupported forms (OVER <named-window>,
+        // DISTINCT ON, parenthesized UPDATE SET).
+        if (current_token_ &&
+            (current_token_->value == "ROLLUP" || current_token_->value == "rollup" ||
+             current_token_->value == "CUBE" || current_token_->value == "cube" ||
+             current_token_->value == "GROUPING" || current_token_->value == "grouping")) {
+            error("comma-separated ROLLUP/CUBE/GROUPING SETS grouping lists are not supported");
+            pop_context();
+            return nullptr;
+        }
+
         ast::ASTNode* group_item = nullptr;
         
         // Could be a number (GROUP BY 1, 2), expression, or column
