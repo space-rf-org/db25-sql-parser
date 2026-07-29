@@ -167,17 +167,30 @@ TEST_F(CTETest, RecursiveCTE) {
     
     auto* cte_clause = find_child_by_type(ast, NodeType::CTEClause);
     ASSERT_NE(cte_clause, nullptr);
-    
-    // Should be marked as RECURSIVE
-    EXPECT_TRUE(cte_clause->semantic_flags & 0x100) << "CTE clause should have RECURSIVE flag";
-    
+
+    // Should be marked RECURSIVE via the canonical NodeFlags::IsRecursive so the
+    // analyzer/binder can detect it with has_flag (was a magic semantic_flags bit
+    // that nothing downstream consumed).
+    EXPECT_TRUE(has_flag(cte_clause->flags, NodeFlags::IsRecursive))
+        << "WITH RECURSIVE clause should carry NodeFlags::IsRecursive";
+
     auto* cte_def = find_child_by_type(cte_clause, NodeType::CTEDefinition);
     ASSERT_NE(cte_def, nullptr);
     EXPECT_EQ(cte_def->primary_text, "employee_hierarchy");
-    
+
     // Should contain a UNION statement
     auto* union_stmt = find_node_by_type(cte_def, NodeType::UnionStmt);
     ASSERT_NE(union_stmt, nullptr) << "Recursive CTE should contain UNION";
+}
+
+// A plain (non-recursive) WITH must NOT carry the recursive flag.
+TEST_F(CTETest, NonRecursiveCTEHasNoRecursiveFlag) {
+    auto* ast = parse("WITH t AS (SELECT 1 AS n) SELECT n FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* cte_clause = find_child_by_type(ast, NodeType::CTEClause);
+    ASSERT_NE(cte_clause, nullptr);
+    EXPECT_FALSE(has_flag(cte_clause->flags, NodeFlags::IsRecursive))
+        << "plain WITH must not be marked recursive";
 }
 
 // ============================================================================
