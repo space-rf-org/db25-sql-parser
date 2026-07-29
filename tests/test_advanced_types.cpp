@@ -219,6 +219,39 @@ TEST_F(AdvancedTypesTest, ArrayOfInterval) {
     ASSERT_TRUE(result.has_value()) << "Should parse INTERVAL[] type";
 }
 
+// An array-type postfix cast (`x::text[]`) must parse in ANY expression
+// position, not only at the top level of a SELECT item / WHERE. The postfix
+// cast handler did not consume the trailing `[]`, so `x::text[]` nested in
+// parentheses, a function argument, or a CASE branch was rejected (the `[` was
+// left dangling). Regression: this is the construct in the pg_case corpus row
+// `... THEN ARRAY[...] || enum_range(...)::text[] ...`.
+TEST_F(AdvancedTypesTest, ArrayCastInNestedContexts) {
+    // Parenthesized.
+    EXPECT_TRUE(parser.parse("SELECT (x::text[])").has_value());
+    parser.reset();
+    // Function argument.
+    EXPECT_TRUE(parser.parse("SELECT f(x::text[])").has_value());
+    parser.reset();
+    // CASE branch, including the || array-concat form from the corpus.
+    EXPECT_TRUE(parser.parse(
+        "SELECT CASE WHEN true THEN ARRAY['a'] || x::text[] ELSE ARRAY['c'] END")
+                    .has_value());
+    parser.reset();
+    // The full pg_case corpus statement now parses.
+    EXPECT_TRUE(parser.parse(
+        "SELECT CASE 'foo'::text WHEN 'foo' "
+        "THEN ARRAY['a', 'b', 'c', 'd'] || enum_range(NULL::casetestenum)::text[] "
+        "ELSE ARRAY['x', 'y'] END")
+                    .has_value());
+    parser.reset();
+    // A CastExpr node is produced and marked as an array type.
+    auto result = parser.parse("SELECT CASE WHEN true THEN x::text[] END");
+    ASSERT_TRUE(result.has_value());
+    auto* cast = find_node_type(result.value(), NodeType::CastExpr);
+    ASSERT_NE(cast, nullptr);
+    EXPECT_TRUE(contains_text(cast, "[]")) << "type node records array-ness";
+}
+
 // ============================================================================
 // Summary Test
 // ============================================================================
