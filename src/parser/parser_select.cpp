@@ -26,10 +26,13 @@ ast::ASTNode* Parser::parse_with_statement() {
     new (cte_clause) ast::ASTNode(ast::NodeType::CTEClause);
     cte_clause->node_id = next_node_id_++;
     
-    // Check for RECURSIVE
+    // Check for RECURSIVE. Record it as the canonical NodeFlags::IsRecursive on
+    // the WITH/CTE clause (RECURSIVE modifies the whole WITH list) so downstream
+    // stages can detect it with has_flag(NodeFlags::IsRecursive); previously it
+    // was stashed on a magic semantic_flags bit that nothing consumed.
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::RECURSIVE) {
-        cte_clause->semantic_flags |= 0x100;  // Set RECURSIVE flag (bit 8)
+        cte_clause->set_flag(ast::NodeFlags::IsRecursive);
         advance();
 #ifdef DEBUG_CTE
         if (current_token_) {
