@@ -1190,8 +1190,15 @@ ast::ASTNode* Parser::parse_group_by_clause() {
     new (group_node) ast::ASTNode(ast::NodeType::GroupByClause);
     group_node->node_id = next_node_id_++;
     
-    // Check for GROUPING SETS, CUBE, or ROLLUP
-    if (current_token_ && (current_token_->value == "GROUPING" || current_token_->value == "grouping")) {  // TODO: Add GROUPING to keywords
+    // Check for GROUPING SETS, CUBE, or ROLLUP. These are NON-RESERVED keywords:
+    // each introduces a grouping construct only when ROLLUP / CUBE is immediately
+    // followed by '(' or GROUPING by SETS. Otherwise the token is a plain column
+    // identifier (`GROUP BY rollup`, `GROUP BY cube, x`), which must fall through
+    // to the ordinary item path below - dispatching on the bare keyword value
+    // hijacked such a column into an empty grouping element (or dropped the whole
+    // clause). The peek keeps this to a genuine grouping construct.
+    if (current_token_ && (current_token_->value == "GROUPING" || current_token_->value == "grouping") &&
+        peek_token_ && (peek_token_->value == "SETS" || peek_token_->value == "sets")) {  // TODO: Add GROUPING to keywords
         advance(); // consume GROUPING
         if (current_token_ && (current_token_->value == "SETS" || current_token_->value == "sets")) {  // TODO: Add SETS to keywords
             advance(); // consume SETS
@@ -1303,7 +1310,8 @@ ast::ASTNode* Parser::parse_group_by_clause() {
             pop_context();
             return group_node;
         }
-    } else if (current_token_ && (current_token_->value == "CUBE" || current_token_->value == "cube")) {  // TODO: Add CUBE to keywords
+    } else if (current_token_ && (current_token_->value == "CUBE" || current_token_->value == "cube") &&
+               peek_token_ && peek_token_->value == "(") {  // TODO: Add CUBE to keywords
         advance(); // consume CUBE
         
         // Create CUBE node
@@ -1360,7 +1368,8 @@ ast::ASTNode* Parser::parse_group_by_clause() {
         }
         pop_context();
         return group_node;
-    } else if (current_token_ && (current_token_->value == "ROLLUP" || current_token_->value == "rollup")) {  // TODO: Add ROLLUP to keywords
+    } else if (current_token_ && (current_token_->value == "ROLLUP" || current_token_->value == "rollup") &&
+               peek_token_ && peek_token_->value == "(") {  // TODO: Add ROLLUP to keywords
         advance(); // consume ROLLUP
         
         // Create ROLLUP node
@@ -1456,18 +1465,24 @@ ast::ASTNode* Parser::parse_group_by_clause() {
            current_token_->value == ",") {
         advance(); // consume comma
 
-        // A ROLLUP / CUBE / GROUPING SETS element is only recognized as the FIRST
-        // group-by item (handled by the branches above). Appearing later in the
-        // list it would be mis-parsed by parse_expression as an ordinary function
-        // call named ROLLUP/CUBE. A comma-separated list of grouping elements is
-        // legal SQL but unsupported here (the analyzer/binder do not model it), so
-        // reject the statement cleanly rather than mis-represent it - matching the
-        // parser's handling of other unsupported forms (OVER <named-window>,
-        // DISTINCT ON, parenthesized UPDATE SET).
-        if (current_token_ &&
+        // A ROLLUP(...) / CUBE(...) / GROUPING SETS(...) grouping construct as a
+        // non-first item is a comma-separated list of grouping elements: legal SQL
+        // but unsupported here (the analyzer/binder do not model it), so reject the
+        // statement cleanly rather than let parse_expression mis-represent it as an
+        // ordinary function call - matching the parser's handling of other
+        // unsupported forms (OVER <named-window>, DISTINCT ON, parenthesized UPDATE
+        // SET). This must fire ONLY for a genuine grouping construct: ROLLUP/CUBE/
+        // GROUPING are non-reserved keywords, so `GROUP BY x, rollup` where rollup
+        // is a plain column (not followed by '(' resp. SETS) is a valid two-column
+        // grouping and must parse normally.
+        const bool cur_rollup_or_cube = current_token_ &&
             (current_token_->value == "ROLLUP" || current_token_->value == "rollup" ||
-             current_token_->value == "CUBE" || current_token_->value == "cube" ||
-             current_token_->value == "GROUPING" || current_token_->value == "grouping")) {
+             current_token_->value == "CUBE" || current_token_->value == "cube");
+        const bool cur_grouping = current_token_ &&
+            (current_token_->value == "GROUPING" || current_token_->value == "grouping");
+        if ((cur_rollup_or_cube && peek_token_ && peek_token_->value == "(") ||
+            (cur_grouping && peek_token_ &&
+             (peek_token_->value == "SETS" || peek_token_->value == "sets"))) {
             error("comma-separated ROLLUP/CUBE/GROUPING SETS grouping lists are not supported");
             pop_context();
             return nullptr;
