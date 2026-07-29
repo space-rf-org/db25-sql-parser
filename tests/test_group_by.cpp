@@ -261,3 +261,34 @@ TEST_F(GroupByTest, GroupByPosition) {
     EXPECT_EQ(pos2->node_type, NodeType::IntegerLiteral);
     EXPECT_EQ(pos2->primary_text, "2");
 }
+
+// A comma-separated LIST of grouping elements (`CUBE(a), ROLLUP(b)`), or a
+// grouping element mixed with plain items (`ROLLUP(a), b` / `a, ROLLUP(b)`), is
+// legal SQL but unsupported by this parser (the analyzer/binder do not model
+// multi-element grouping-set lists). It must be REJECTED cleanly, never silently
+// parsed as a GROUP BY over only the first element. Regression: the ROLLUP / CUBE
+// / GROUPING SETS branches returned after one element without running the
+// comma-item loop, so every following item was dropped with no diagnostic - a
+// coarser grouping that mis-executes the query.
+TEST_F(GroupByTest, GroupingSetListRejected) {
+    EXPECT_EQ(parse("SELECT a FROM t GROUP BY CUBE(a), ROLLUP(b)"), nullptr);
+    EXPECT_EQ(parse("SELECT a FROM t GROUP BY ROLLUP(a), b"), nullptr);
+    EXPECT_EQ(parse("SELECT a FROM t GROUP BY CUBE(a), b, c"), nullptr);
+    EXPECT_EQ(parse("SELECT a FROM t GROUP BY GROUPING SETS ((a)), b"), nullptr);
+    EXPECT_EQ(parse("SELECT a FROM t GROUP BY a, ROLLUP(b)"), nullptr);
+
+    // A single grouping element is still accepted (one GroupingElement child),
+    // and ordinary GROUP BY lists are unaffected.
+    auto* rollup = parse("SELECT a FROM t GROUP BY ROLLUP(a)");
+    ASSERT_NE(rollup, nullptr);
+    auto* gb1 = find_node_by_type(rollup, NodeType::GroupByClause);
+    ASSERT_NE(gb1, nullptr);
+    EXPECT_EQ(gb1->child_count, 1);
+    EXPECT_EQ(gb1->first_child->node_type, NodeType::GroupingElement);
+
+    auto* plain = parse("SELECT a, b FROM t GROUP BY a, b");
+    ASSERT_NE(plain, nullptr);
+    auto* gb2 = find_node_by_type(plain, NodeType::GroupByClause);
+    ASSERT_NE(gb2, nullptr);
+    EXPECT_EQ(gb2->child_count, 2);
+}
