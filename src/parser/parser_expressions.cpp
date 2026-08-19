@@ -163,9 +163,21 @@ ast::ASTNode* Parser::parse_primary_expression() {
         unary_node->primary_text = copy_to_arena(op);
         
         advance(); // consume operator
-        
-        // Parse operand
+
+        // Parse operand. The `::type` postfix cast and COLLATE bind TIGHTER than
+        // unary +/- (Postgres precedence: `::`, `[]`, unary `+`/`-`, `^`, ...),
+        // so run the postfix passes on the operand right here. Otherwise the
+        // operand is a bare primary and the postfix re-binds to the WHOLE unary
+        // node up in parse_expression, mis-parsing `-a::int` as `(-a)::int`
+        // instead of `-(a::int)` (and `-'5'::int` as unary minus over a string
+        // literal - a spurious type error on a legal query).
         auto* operand = parse_primary_expression();
+        if (operand) {
+            operand = parse_collate_postfix(operand);
+        }
+        if (operand) {
+            operand = parse_cast_postfix(operand);
+        }
         if (operand) {
             operand->parent = unary_node;
             unary_node->first_child = operand;

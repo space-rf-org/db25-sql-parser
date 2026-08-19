@@ -773,3 +773,63 @@ TEST_F(PrecedenceRegressionTest, ParenSubqueryLeftOperandStaysScalarExpr) {
     EXPECT_NE(find(parse("SELECT * FROM ((SELECT 1) UNION (SELECT 2)) t"), NodeType::UnionStmt), nullptr)
         << "over-corrected: a real parenthesized set-op derived table is no longer a query body";
 }
+
+// -----------------------------------------------------------------------------
+// Unary +/- binds LOOSER than the `::type` postfix cast and COLLATE, so the
+// postfix must attach to the OPERAND, not re-bind to the whole unary node.
+// Postgres precedence: `::`, `[]`, unary `+`/`-`, `^`, ... Before the fix
+// `-a::int` parsed as `(-a)::int` (root CastExpr over a UnaryExpr); it must be
+// `-(a::int)` (root UnaryExpr over a CastExpr).
+TEST_F(PrecedenceRegressionTest, UnaryMinusBindsLooserThanCast) {
+    auto* root = first_projection(parse("SELECT -a::int FROM t"));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnaryExpr);        // `-` is the root
+    EXPECT_EQ(root->primary_text, "-");
+    auto* inner = root->first_child;
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(inner->node_type, NodeType::CastExpr)          // cast is UNDER the minus
+        << "-a::int must parse as -(a::int), not (-a)::int";
+    // cast children are [value, Identifier(type)]; the type is `int`.
+    auto* type_node = inner->first_child ? inner->first_child->next_sibling : nullptr;
+    ASSERT_NE(type_node, nullptr);
+    EXPECT_EQ(type_node->primary_text, "int");
+}
+
+// `-'5'::int` must be `-( '5'::int )` = -5, not unary-minus over a bare string
+// literal (which the analyzer would reject as a type error on a legal query).
+TEST_F(PrecedenceRegressionTest, UnaryMinusOverCastStringLiteral) {
+    auto* root = first_projection(parse("SELECT -'5'::int"));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnaryExpr);
+    ASSERT_NE(root->first_child, nullptr);
+    EXPECT_EQ(root->first_child->node_type, NodeType::CastExpr)
+        << "-'5'::int must parse as -('5'::int)";
+}
+
+// COLLATE is also a tighter-binding postfix: `-a COLLATE \"C\"` is
+// `-(a COLLATE \"C\")`, root UnaryExpr over a CollateClause.
+TEST_F(PrecedenceRegressionTest, UnaryMinusBindsLooserThanCollate) {
+    auto* root = first_projection(parse("SELECT -a COLLATE \"C\" FROM t"));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnaryExpr);
+    ASSERT_NE(root->first_child, nullptr);
+    EXPECT_EQ(root->first_child->node_type, NodeType::CollateClause)
+        << "-a COLLATE \"C\" must parse as -(a COLLATE \"C\")";
+}
+
+// Guard against over-correction: a plain unary minus with no postfix is
+// unchanged, and `(-a)::int` with explicit parens still casts the negation.
+TEST_F(PrecedenceRegressionTest, UnaryMinusPlainAndParenthesizedCastUnchanged) {
+    auto* plain = first_projection(parse("SELECT -a FROM t"));
+    ASSERT_NE(plain, nullptr);
+    EXPECT_EQ(plain->node_type, NodeType::UnaryExpr);
+    ASSERT_NE(plain->first_child, nullptr);
+    EXPECT_NE(plain->first_child->node_type, NodeType::CastExpr);
+
+    auto* paren = first_projection(parse("SELECT (-a)::int FROM t"));
+    ASSERT_NE(paren, nullptr);
+    EXPECT_EQ(paren->node_type, NodeType::CastExpr)         // explicit parens: cast is root
+        << "(-a)::int must still cast the negation";
+    ASSERT_NE(paren->first_child, nullptr);
+    EXPECT_EQ(paren->first_child->node_type, NodeType::UnaryExpr);
+}
