@@ -601,18 +601,28 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
         return nullptr;
     }
 
-    // COLLATE is a postfix that binds tighter than any binary operator, so it
-    // attaches to the primary before the precedence loop: `a = b COLLATE "C"`
-    // parses as `a = (b COLLATE "C")`.
-    left = parse_collate_postfix(left);
-    if (!left) {
-        return nullptr;
-    }
-    // `::` cast shorthand binds as tightly as COLLATE (tighter than any binary
-    // operator), so apply it as a postfix here too.
-    left = parse_cast_postfix(left);
-    if (!left) {
-        return nullptr;
+    // COLLATE and the `::type` cast shorthand are SAME-precedence postfixes -
+    // both bind tighter than any binary operator - applied left to right. Loop
+    // the two passes until neither consumes a token: a single collate-then-cast
+    // pass dropped a COLLATE that TRAILS a cast (`a::int COLLATE "C"`), because
+    // the collate pass ran before the `::` was consumed and nothing re-checked
+    // for COLLATE afterwards - leaving `COLLATE "C" <rest of statement>`
+    // unconsumed and silently discarded (FROM/WHERE and all). Looping makes
+    // `a::int COLLATE "C"` -> `(a::int) COLLATE "C"`, matching the CAST(...)
+    // COLLATE and plain-COLLATE shapes, and preserves the trailing clauses.
+    while (true) {
+        ast::ASTNode* before = left;
+        left = parse_collate_postfix(left);
+        if (!left) {
+            return nullptr;
+        }
+        left = parse_cast_postfix(left);
+        if (!left) {
+            return nullptr;
+        }
+        if (left == before) {
+            break;  // neither postfix consumed anything
+        }
     }
 
     // Loop to handle operators with precedence
