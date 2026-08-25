@@ -989,3 +989,50 @@ TEST_F(PrecedenceRegressionTest, IlikeAndNotLikePatternPrecedence) {
     EXPECT_EQ(pat->node_type, NodeType::BinaryExpr);   // 'a' || 'b'
     EXPECT_EQ(pat->primary_text, "||");
 }
+
+// BETWEEN/IN/LIKE/ILIKE bind TIGHTER than the comparison operators, so a
+// comparison that PRECEDES one must not absorb its left operand: `x = y BETWEEN
+// 1 AND 10` is `x = (y BETWEEN 1 AND 10)`, not `(x = y) BETWEEN 1 AND 10`. This is
+// the companion to the LIKE-pattern fix, which only handled the reverse order
+// (LIKE/BETWEEN/IN preceding the comparison). IS stays BELOW comparison.
+TEST_F(PrecedenceRegressionTest, RangeMembershipBindsTighterThanComparison) {
+    // = over BETWEEN
+    auto* r1 = first_projection(parse("SELECT x = y BETWEEN 1 AND 10 FROM t"));
+    ASSERT_NE(r1, nullptr);
+    EXPECT_EQ(r1->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(r1->primary_text, "=");
+    auto* rhs1 = r1->first_child ? r1->first_child->next_sibling : nullptr;
+    ASSERT_NE(rhs1, nullptr);
+    EXPECT_EQ(rhs1->node_type, NodeType::BetweenExpr)
+        << "y BETWEEN 1 AND 10 must be the RHS of =";
+
+    // = over LIKE
+    auto* r2 = first_projection(parse("SELECT a = b LIKE c FROM t"));
+    ASSERT_NE(r2, nullptr);
+    EXPECT_EQ(r2->node_type, NodeType::BinaryExpr);
+    auto* rhs2 = r2->first_child ? r2->first_child->next_sibling : nullptr;
+    ASSERT_NE(rhs2, nullptr);
+    EXPECT_EQ(rhs2->node_type, NodeType::LikeExpr);
+
+    // <> over IN
+    auto* r3 = first_projection(parse("SELECT a <> b IN (1) FROM t"));
+    ASSERT_NE(r3, nullptr);
+    EXPECT_EQ(r3->node_type, NodeType::BinaryExpr);
+    auto* rhs3 = r3->first_child ? r3->first_child->next_sibling : nullptr;
+    ASSERT_NE(rhs3, nullptr);
+    EXPECT_EQ(rhs3->node_type, NodeType::InExpr);
+
+    // Guard: IS stays BELOW comparison -> (a = b) IS NULL, root IsNullExpr.
+    auto* r4 = first_projection(parse("SELECT a = b IS NULL FROM t"));
+    ASSERT_NE(r4, nullptr);
+    EXPECT_EQ(r4->node_type, NodeType::IsNullExpr)
+        << "IS must stay below comparison (matches Postgres)";
+
+    // Guard: the reverse order still works (LIKE-pattern fix, f9ded2f) ->
+    // (x LIKE '%a%') = TRUE, root comparison over a LikeExpr.
+    auto* r5 = first_projection(parse("SELECT x LIKE '%a%' = TRUE FROM t"));
+    ASSERT_NE(r5, nullptr);
+    EXPECT_EQ(r5->node_type, NodeType::BinaryExpr);
+    ASSERT_NE(r5->first_child, nullptr);
+    EXPECT_EQ(r5->first_child->node_type, NodeType::LikeExpr);
+}

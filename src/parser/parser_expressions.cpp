@@ -599,11 +599,19 @@ int Parser::get_precedence() const {
         // Binary operators
         if (current_token_->keyword_id == db25::Keyword::OR) return 1;  // PREC_OR
         if (current_token_->keyword_id == db25::Keyword::AND) return 2;  // PREC_AND
-        // SQL-specific operators (higher than AND but lower than comparison)
-        if (current_token_->keyword_id == db25::Keyword::BETWEEN) return 3;  // PREC_BETWEEN
-        if (current_token_->keyword_id == db25::Keyword::IN) return 3;  // PREC_IN
-        if (current_token_->keyword_id == db25::Keyword::LIKE) return 3;  // PREC_LIKE
-        if (current_token_->keyword_id == db25::Keyword::ILIKE) return 3;  // PREC_LIKE (case-insensitive)
+        // BETWEEN / IN / LIKE / ILIKE bind TIGHTER than the comparison operators
+        // (< > = <= >= <>), matching PostgreSQL (Table 4.2). So a comparison that
+        // PRECEDES one of them must not absorb its left operand: `x = y BETWEEN 1
+        // AND 10` is `x = (y BETWEEN 1 AND 10)`, `a = b LIKE c` is `a = (b LIKE c)`.
+        // At the old precedence 3 (below comparison 4) the comparison reduced
+        // first, producing the inverted `(x = y) BETWEEN ...`. (The operand hacks
+        // - bounds / pattern parsed at 5 - only fixed the reverse order, where
+        // LIKE/BETWEEN/IN precede the comparison.) IS stays BELOW comparison (3),
+        // which matches Postgres (`a = b IS NULL` -> `(a = b) IS NULL`).
+        if (current_token_->keyword_id == db25::Keyword::BETWEEN) return 5;  // PREC_RANGE
+        if (current_token_->keyword_id == db25::Keyword::IN) return 5;  // PREC_RANGE
+        if (current_token_->keyword_id == db25::Keyword::LIKE) return 5;  // PREC_RANGE
+        if (current_token_->keyword_id == db25::Keyword::ILIKE) return 5;  // PREC_RANGE
         if (current_token_->keyword_id == db25::Keyword::IS) return 3;  // PREC_IS (for IS NULL)
         // NOT can be binary when followed by LIKE/ILIKE/IN/BETWEEN
         if (current_token_->keyword_id == db25::Keyword::NOT) {
@@ -613,7 +621,7 @@ int Parser::get_precedence() const {
                     peek_token_->keyword_id == db25::Keyword::ILIKE ||
                     peek_token_->keyword_id == db25::Keyword::IN ||
                     peek_token_->keyword_id == db25::Keyword::BETWEEN) {
-                    return 3;  // Same precedence as LIKE/IN/BETWEEN
+                    return 5;  // Same precedence as LIKE/IN/BETWEEN (PREC_RANGE)
                 }
             }
             return 0;  // Otherwise NOT is not a binary operator here
