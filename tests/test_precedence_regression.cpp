@@ -887,3 +887,50 @@ TEST_F(PrecedenceRegressionTest, PlainNegativeLiteralStillFolds) {
     EXPECT_EQ(f->node_type, NodeType::FloatLiteral);
     EXPECT_EQ(f->primary_text, "-5.5");
 }
+
+// A COLLATE trailing a `::type` cast must bind to the cast - `(a::int) COLLATE
+// "C"` - and must NOT derail the rest of the statement. The postfix passes ran
+// collate-then-cast once, so a COLLATE after a cast was left unconsumed and the
+// parser's leftover-token tolerance silently DISCARDED it and every following
+// clause (FROM/WHERE/...), returning a truncated AST as 'success'.
+TEST_F(PrecedenceRegressionTest, CollateAfterCastKeepsTrailingClauses) {
+    ASTNode* ast = parse("SELECT a::int COLLATE \"C\" FROM t");
+    ASSERT_NE(ast, nullptr);
+    // FROM must survive (the bug dropped it entirely).
+    EXPECT_NE(find(ast, NodeType::FromClause), nullptr)
+        << "FROM clause was silently dropped after `::type COLLATE`";
+    auto* root = first_projection(ast);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::CollateClause);      // COLLATE is the root
+    ASSERT_NE(root->first_child, nullptr);
+    EXPECT_EQ(root->first_child->node_type, NodeType::CastExpr)  // over the cast
+        << "a::int COLLATE \"C\" must parse as (a::int) COLLATE \"C\"";
+}
+
+TEST_F(PrecedenceRegressionTest, CollateAfterCastInWherePredicate) {
+    ASTNode* ast = parse("SELECT * FROM t WHERE a::text COLLATE \"C\" = b");
+    ASSERT_NE(ast, nullptr);
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    // The `= b` comparison must survive (the bug corrupted the filter to a bare
+    // cast by dropping `COLLATE "C" = b`).
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "=");
+    auto* lhs = pred->first_child;
+    ASSERT_NE(lhs, nullptr);
+    EXPECT_EQ(lhs->node_type, NodeType::CollateClause);
+}
+
+// Chained casts then COLLATE, and the controls that always worked, still do.
+TEST_F(PrecedenceRegressionTest, CollateAfterCastChainedAndControls) {
+    ASTNode* a = parse("SELECT a::int::text COLLATE \"C\" FROM t");
+    ASSERT_NE(a, nullptr);
+    EXPECT_NE(find(a, NodeType::FromClause), nullptr);
+    auto* r = first_projection(a);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(r->node_type, NodeType::CollateClause);
+    // Controls: plain cast, plain COLLATE, CAST(...) COLLATE all keep FROM.
+    EXPECT_NE(find(parse("SELECT a::int FROM t"), NodeType::FromClause), nullptr);
+    EXPECT_NE(find(parse("SELECT x COLLATE \"C\" FROM t"), NodeType::FromClause), nullptr);
+    EXPECT_NE(find(parse("SELECT CAST(x AS text) COLLATE \"C\" FROM t"), NodeType::FromClause), nullptr);
+}
