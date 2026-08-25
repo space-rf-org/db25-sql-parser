@@ -104,3 +104,22 @@ TEST(ParserNegativeTest, PlainDistinctStillParses) {
     Parser parser;
     EXPECT_TRUE(parser.parse("SELECT DISTINCT a, b FROM t").has_value());
 }
+
+// WITHIN GROUP (ORDER BY ...) - an ordered-set aggregate - is not yet supported
+// and MUST be rejected cleanly, not silently mis-parsed. Before the fix the
+// parser returned "success" with an AST of only `SELECT percentile_cont(0.5)`,
+// silently discarding WITHIN GROUP and every following clause (FROM/WHERE).
+TEST(ParserNegativeTest, WithinGroupRejected) {
+    expect_parse_error("SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY x) FROM t");
+    expect_parse_error("SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY x) FROM t WHERE y > 0");
+    expect_parse_error("SELECT mode() WITHIN GROUP (ORDER BY x) FROM t");
+}
+
+// Guard: the fix sits on the aggregate-postfix path, so ordinary calls and the
+// FILTER / OVER postfixes must still parse (no over-rejection).
+TEST(ParserNegativeTest, WithinGroupFixDoesNotBreakNormalCalls) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT count(*) FROM t WHERE y > 0").has_value());
+    EXPECT_TRUE(parser.parse("SELECT count(*) FILTER (WHERE y > 0) FROM t").has_value());
+    EXPECT_TRUE(parser.parse("SELECT sum(x) OVER (PARTITION BY g) FROM t").has_value());
+}
