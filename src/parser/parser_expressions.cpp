@@ -1363,6 +1363,12 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand) {
         // later postfix pass happened to absorb the `[`; nested in parens, a
         // function argument, or a CASE branch it was left dangling and the parse
         // failed. Consume the suffix here so an array-type cast parses uniformly.
+        // Count the `[]` pairs first, then append the suffix ONCE. Rebuilding
+        // `primary_text` inside the loop re-copied the whole (growing) type
+        // string on every dimension - O(N^2) parse time and O(N^2) never-freed
+        // arena bytes for an N-dimension cast, so a large legal `x::int[][]...[]`
+        // exhausted memory. A single build is linear.
+        std::size_t array_dims = 0;
         while (current_token_ && current_token_->value == "[") {
             advance();  // consume [
             if (current_token_ &&
@@ -1371,13 +1377,20 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand) {
             }
             if (current_token_ && current_token_->value == "]") {
                 advance();  // consume ]
-                type_node->flags = static_cast<ast::NodeFlags>(
-                    static_cast<uint8_t>(type_node->flags) | 0x80);  // array-type flag
-                type_node->primary_text =
-                    copy_to_arena(std::string(type_node->primary_text) + "[]");
+                ++array_dims;
             } else {
                 break;  // malformed: leave it for the caller / error path
             }
+        }
+        if (array_dims > 0) {
+            type_node->flags = static_cast<ast::NodeFlags>(
+                static_cast<uint8_t>(type_node->flags) | 0x80);  // array-type flag
+            std::string type_text{type_node->primary_text};
+            type_text.reserve(type_text.size() + array_dims * 2);
+            for (std::size_t i = 0; i < array_dims; ++i) {
+                type_text += "[]";
+            }
+            type_node->primary_text = copy_to_arena(type_text);
         }
 
         operand->parent = cast_node;
