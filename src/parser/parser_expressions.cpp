@@ -139,21 +139,44 @@ ast::ASTNode* Parser::parse_primary_expression() {
         
         // Look ahead - if next is a number, we might combine them
         if (peek_token_ && peek_token_->type == tokenizer::TokenType::Number && op == "-") {
-            // For negative numbers, just parse as number with minus
-            advance(); // consume -
-            // Combine - with number
-            std::string combined = "-";
-            combined += std::string(current_token_->value);
+            // Negative numeric literal. The `::type` cast and COLLATE postfix
+            // bind TIGHTER than the unary minus (Postgres precedence: `::`, `[]`,
+            // unary `+`/`-`, ...), so build the UNSIGNED literal first and run the
+            // postfix passes on it. If a postfix binds, the minus applies to the
+            // whole postfixed value -> `-(5::text)`, matching the general
+            // unary-operand path (`-a::int` -> `-(a::int)`). Only when NO postfix
+            // follows do we fold the sign into the literal (the fast path for a
+            // plain `-5`). number_literal_type ignores a leading sign, so the node
+            // type is the same either way.
+            advance();  // consume '-'; current_token_ is the number
+            const std::string digits = std::string(current_token_->value);
 
             auto* num = arena_.allocate<ast::ASTNode>();
-            new (num) ast::ASTNode(internal::number_literal_type(combined));
+            new (num) ast::ASTNode(internal::number_literal_type(digits));
             num->node_id = next_node_id_++;
+            num->primary_text = copy_to_arena(digits);  // unsigned for now
+            advance();  // consume the number
 
-            num->primary_text = copy_to_arena(combined);
-            advance();
-            return num;
+            ast::ASTNode* operand = parse_collate_postfix(num);
+            if (operand) operand = parse_cast_postfix(operand);
+            if (operand == num) {
+                // No postfix bound: fold the sign into the literal (fast path).
+                num->primary_text = copy_to_arena("-" + digits);
+                return num;
+            }
+            // A postfix bound to the number; wrap the whole thing in unary minus.
+            auto* unary_node = arena_.allocate<ast::ASTNode>();
+            new (unary_node) ast::ASTNode(ast::NodeType::UnaryExpr);
+            unary_node->node_id = next_node_id_++;
+            unary_node->primary_text = copy_to_arena(op);  // "-"
+            if (operand) {
+                operand->parent = unary_node;
+                unary_node->first_child = operand;
+                unary_node->child_count = 1;
+            }
+            return unary_node;
         }
-        
+
         // Otherwise, create unary expression
         auto* unary_node = arena_.allocate<ast::ASTNode>();
         new (unary_node) ast::ASTNode(ast::NodeType::UnaryExpr);

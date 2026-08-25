@@ -833,3 +833,57 @@ TEST_F(PrecedenceRegressionTest, UnaryMinusPlainAndParenthesizedCastUnchanged) {
     ASSERT_NE(paren->first_child, nullptr);
     EXPECT_EQ(paren->first_child->node_type, NodeType::UnaryExpr);
 }
+
+// A NEGATIVE NUMERIC LITERAL must obey the same postfix precedence as any other
+// unary-minus operand: `::type` and COLLATE bind tighter than the minus. The
+// negative-literal fast path used to fold `-5` into a signed literal BEFORE the
+// postfix passes, so `-5::text` mis-parsed as `(-5)::text` (root CastExpr) - a
+// legal cast of -5 - instead of Postgres's `-(5::text)` (root UnaryExpr). This
+// diverged from the sibling `-a::text` and `+5::text` paths.
+TEST_F(PrecedenceRegressionTest, NegativeLiteralCastBindsUnderMinus) {
+    auto* root = first_projection(parse("SELECT -5::text"));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnaryExpr);       // `-` is the root
+    EXPECT_EQ(root->primary_text, "-");
+    auto* inner = root->first_child;
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(inner->node_type, NodeType::CastExpr)         // cast is UNDER the minus
+        << "-5::text must parse as -(5::text), not (-5)::text";
+    auto* value = inner->first_child;
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->node_type, NodeType::IntegerLiteral);
+    EXPECT_EQ(value->primary_text, "5");                    // UNSIGNED under the cast
+}
+
+TEST_F(PrecedenceRegressionTest, NegativeFloatLiteralCastBindsUnderMinus) {
+    auto* root = first_projection(parse("SELECT -5.5::text"));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnaryExpr);
+    ASSERT_NE(root->first_child, nullptr);
+    EXPECT_EQ(root->first_child->node_type, NodeType::CastExpr);
+    ASSERT_NE(root->first_child->first_child, nullptr);
+    EXPECT_EQ(root->first_child->first_child->node_type, NodeType::FloatLiteral);
+    EXPECT_EQ(root->first_child->first_child->primary_text, "5.5");
+}
+
+TEST_F(PrecedenceRegressionTest, NegativeLiteralCollateBindsUnderMinus) {
+    auto* root = first_projection(parse("SELECT -5 COLLATE \"C\""));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::UnaryExpr);
+    ASSERT_NE(root->first_child, nullptr);
+    EXPECT_EQ(root->first_child->node_type, NodeType::CollateClause)
+        << "-5 COLLATE \"C\" must parse as -(5 COLLATE \"C\")";
+}
+
+// Guard: a plain negative literal with NO postfix still folds into one signed
+// numeric literal (the fast path is preserved, not regressed into a UnaryExpr).
+TEST_F(PrecedenceRegressionTest, PlainNegativeLiteralStillFolds) {
+    auto* root = first_projection(parse("SELECT -5"));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::IntegerLiteral);
+    EXPECT_EQ(root->primary_text, "-5");
+    auto* f = first_projection(parse("SELECT -5.5"));
+    ASSERT_NE(f, nullptr);
+    EXPECT_EQ(f->node_type, NodeType::FloatLiteral);
+    EXPECT_EQ(f->primary_text, "-5.5");
+}
