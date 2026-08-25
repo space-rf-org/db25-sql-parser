@@ -934,3 +934,58 @@ TEST_F(PrecedenceRegressionTest, CollateAfterCastChainedAndControls) {
     EXPECT_NE(find(parse("SELECT x COLLATE \"C\" FROM t"), NodeType::FromClause), nullptr);
     EXPECT_NE(find(parse("SELECT CAST(x AS text) COLLATE \"C\" FROM t"), NodeType::FromClause), nullptr);
 }
+
+// LIKE / ILIKE binds tighter than comparison for its PATTERN operand:
+// `x LIKE '%a%' = TRUE` must parse as `(x LIKE '%a%') = TRUE`, not
+// `x LIKE ('%a%' = TRUE)`. LIKE is precedence 3 but its pattern was parsed at
+// precedence+1 (= 4, PREC_COMP), which folded the trailing `= TRUE` into the
+// pattern. BETWEEN and IN (same operator precedence) already parse their operands
+// at PREC_COMP+1 and leave the trailing comparison for the outer loop; LIKE now
+// matches.
+TEST_F(PrecedenceRegressionTest, LikeBindsTighterThanComparison) {
+    auto* root = first_projection(parse("SELECT x LIKE '%a%' = TRUE FROM t"));
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::BinaryExpr);   // `=` is the root
+    EXPECT_EQ(root->primary_text, "=");
+    auto* like = root->first_child;
+    ASSERT_NE(like, nullptr);
+    EXPECT_EQ(like->node_type, NodeType::LikeExpr)      // LIKE grouped underneath
+        << "x LIKE '%a%' = TRUE must be (x LIKE '%a%') = TRUE";
+    EXPECT_EQ(like->primary_text, "LIKE");
+    // The LIKE pattern is the bare string literal, NOT a `= TRUE` comparison.
+    auto* pattern = like->first_child ? like->first_child->next_sibling : nullptr;
+    ASSERT_NE(pattern, nullptr);
+    EXPECT_NE(pattern->node_type, NodeType::BinaryExpr)
+        << "the `= TRUE` must not be folded into the pattern";
+}
+
+// ILIKE and NOT LIKE obey the same precedence; and a bare LIKE with no trailing
+// comparison is still rooted at the LikeExpr (no over-correction).
+TEST_F(PrecedenceRegressionTest, IlikeAndNotLikePatternPrecedence) {
+    auto* ilike = first_projection(parse("SELECT x ILIKE '%a%' = TRUE FROM t"));
+    ASSERT_NE(ilike, nullptr);
+    EXPECT_EQ(ilike->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(ilike->primary_text, "=");
+    ASSERT_NE(ilike->first_child, nullptr);
+    EXPECT_EQ(ilike->first_child->node_type, NodeType::LikeExpr);
+
+    auto* notlike = first_projection(parse("SELECT x NOT LIKE '%a%' = TRUE FROM t"));
+    ASSERT_NE(notlike, nullptr);
+    EXPECT_EQ(notlike->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(notlike->primary_text, "=");
+    ASSERT_NE(notlike->first_child, nullptr);
+    EXPECT_EQ(notlike->first_child->node_type, NodeType::LikeExpr);
+
+    // Guard: a bare LIKE is still rooted at LikeExpr, and concat still binds INTO
+    // the pattern (`x LIKE 'a' || 'b'` -> pattern is the `||`).
+    auto* bare = first_projection(parse("SELECT x LIKE '%a%' FROM t"));
+    ASSERT_NE(bare, nullptr);
+    EXPECT_EQ(bare->node_type, NodeType::LikeExpr);
+    auto* concat = first_projection(parse("SELECT x LIKE 'a' || 'b' FROM t"));
+    ASSERT_NE(concat, nullptr);
+    EXPECT_EQ(concat->node_type, NodeType::LikeExpr);
+    auto* pat = concat->first_child ? concat->first_child->next_sibling : nullptr;
+    ASSERT_NE(pat, nullptr);
+    EXPECT_EQ(pat->node_type, NodeType::BinaryExpr);   // 'a' || 'b'
+    EXPECT_EQ(pat->primary_text, "||");
+}

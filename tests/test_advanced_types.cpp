@@ -295,6 +295,44 @@ TEST_F(AdvancedTypesTest, ArrayCastDimensionSuffixIsLinear) {
         << "every dimension of a large array cast must be recorded";
 }
 
+// The functional CAST(x AS <type>[]) must consume the array-type suffix exactly
+// as the equivalent x::<type>[] postfix cast does. It once did not, so
+// CAST(x AS int[]) was rejected outright, and - worse - embedding it in a larger
+// statement let the parser's leftover-token tolerance SILENTLY DROP the rest of
+// the statement.
+TEST_F(AdvancedTypesTest, FunctionalCastArraySuffix) {
+    // CAST(x AS int[]) parses and records the array type ('int[]' text), matching
+    // the ::int[] postfix shape.
+    auto one = parser.parse("SELECT CAST(x AS int[])");
+    ASSERT_TRUE(one.has_value()) << "CAST(x AS int[]) must parse";
+    auto* cast = find_node_type(one.value(), NodeType::CastExpr);
+    ASSERT_NE(cast, nullptr);
+    EXPECT_TRUE(contains_text(cast, "int[]")) << "records the array type text";
+    parser.reset();
+
+    // Multi-dimension and sized dimensions collapse to `[]` per dimension, as in
+    // the postfix cast / DDL.
+    auto two = parser.parse("SELECT CAST(x AS int[][])");
+    ASSERT_TRUE(two.has_value());
+    EXPECT_TRUE(contains_text(find_node_type(two.value(), NodeType::CastExpr), "int[][]"));
+    parser.reset();
+    auto sized = parser.parse("SELECT CAST(x AS int[3])");
+    ASSERT_TRUE(sized.has_value());
+    EXPECT_TRUE(contains_text(find_node_type(sized.value(), NodeType::CastExpr), "int[]"));
+    parser.reset();
+
+    // No silent truncation: a following select item AND a FROM/WHERE tail survive.
+    auto multi = parser.parse("SELECT x::int[], CAST(x AS int[]) FROM t WHERE y = 1");
+    ASSERT_TRUE(multi.has_value());
+    auto* list = find_node_type(multi.value(), NodeType::SelectList);
+    ASSERT_NE(list, nullptr);
+    int item_count = 0;
+    for (auto* c = list->first_child; c; c = c->next_sibling) ++item_count;
+    EXPECT_EQ(item_count, 2) << "the CAST(x AS int[]) select item must not be dropped";
+    EXPECT_NE(find_node_type(multi.value(), NodeType::FromClause), nullptr);
+    EXPECT_NE(find_node_type(multi.value(), NodeType::WhereClause), nullptr);
+}
+
 // ============================================================================
 // Summary Test
 // ============================================================================
