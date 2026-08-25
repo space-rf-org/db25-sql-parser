@@ -333,6 +333,53 @@ TEST_F(AdvancedTypesTest, FunctionalCastArraySuffix) {
     EXPECT_NE(find_node_type(multi.value(), NodeType::WhereClause), nullptr);
 }
 
+// DATE / TIME / TIMESTAMP '<literal>' must parse as a DateTimeLiteral that KEEPS
+// its value (the value string was previously dropped on the floor), and
+// CURRENT_DATE / CURRENT_TIME / CURRENT_TIMESTAMP as niladic FunctionCalls (not
+// columns). Both are then valid EXTRACT operands - a typed-literal or niladic
+// EXTRACT operand used to fail to parse entirely.
+TEST_F(AdvancedTypesTest, TemporalLiteralsAndNiladicFunctions) {
+    // DATE literal -> DateTimeLiteral carrying its value.
+    auto d = parser.parse("SELECT DATE '2020-01-01'");
+    ASSERT_TRUE(d.has_value());
+    auto* dl = find_node_type(d.value(), NodeType::DateTimeLiteral);
+    ASSERT_NE(dl, nullptr) << "DATE '...' must be a DateTimeLiteral";
+    EXPECT_TRUE(contains_text(dl, "2020-01-01")) << "the date value must be preserved";
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT TIMESTAMP '2020-01-01 00:00:00'").has_value());
+    parser.reset();
+
+    // CURRENT_DATE / CURRENT_TIMESTAMP / CURRENT_TIME -> a niladic FunctionCall,
+    // not a column, with no dangling tokens.
+    for (const char* sql : {"SELECT CURRENT_DATE", "SELECT current_timestamp",
+                            "SELECT CURRENT_TIME"}) {
+        auto r = parser.parse(sql);
+        ASSERT_TRUE(r.has_value()) << sql;
+        auto* list = find_node_type(r.value(), NodeType::SelectList);
+        ASSERT_NE(list, nullptr);
+        ASSERT_NE(list->first_child, nullptr);
+        EXPECT_EQ(list->first_child->node_type, NodeType::FunctionCall)
+            << sql << " must be a niladic FunctionCall, not a column";
+        parser.reset();
+    }
+
+    // EXTRACT over a typed literal / niladic function / arithmetic now parses.
+    for (const char* sql : {
+            "SELECT EXTRACT(YEAR FROM DATE '2020-01-01')",
+            "SELECT EXTRACT(DAY FROM INTERVAL '3 days')",
+            "SELECT EXTRACT(YEAR FROM CURRENT_DATE)",
+            "SELECT EXTRACT(HOUR FROM ts + INTERVAL '1 day') FROM t"}) {
+        EXPECT_TRUE(parser.parse(sql).has_value()) << sql;
+        parser.reset();
+    }
+
+    // Guards: a bare `date` column and CAST(x AS DATE) are unchanged (the
+    // typed-literal branch only fires when a string follows the type keyword).
+    EXPECT_TRUE(parser.parse("SELECT date FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT CAST(x AS DATE) FROM t").has_value());
+}
+
 // ============================================================================
 // Summary Test
 // ============================================================================

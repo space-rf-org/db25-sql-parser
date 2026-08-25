@@ -353,9 +353,38 @@ ast::ASTNode* Parser::parse_primary_expression() {
 
             advance(); // consume the interval string
             return interval_node;
+        } else if ((kw == "DATE" || kw == "date" || kw == "TIME" || kw == "time" ||
+                    kw == "TIMESTAMP" || kw == "timestamp") &&
+                   peek_token_ && peek_token_->type == tokenizer::TokenType::String) {
+            // DATE / TIME / TIMESTAMP '<literal>' typed literal -> DateTimeLiteral,
+            // mirroring the INTERVAL branch. Only when a string follows, so the
+            // bare keyword as a type name (CAST(x AS DATE)) or a column named
+            // `date` falls through unchanged. The value is carried in primary_text
+            // and as a child StringLiteral.
+            const bool is_time = (kw == "TIME" || kw == "time");
+            const bool is_ts = (kw == "TIMESTAMP" || kw == "timestamp");
+            advance(); // consume the type keyword
+            auto* dt_node = arena_.allocate<ast::ASTNode>();
+            new (dt_node) ast::ASTNode(ast::NodeType::DateTimeLiteral);
+            dt_node->node_id = next_node_id_++;
+            dt_node->data_type = is_ts ? ast::DataType::Timestamp
+                                 : is_time ? ast::DataType::Time
+                                           : ast::DataType::Date;
+            dt_node->primary_text = copy_to_arena(current_token_->value);
+
+            auto* str_node = arena_.allocate<ast::ASTNode>();
+            new (str_node) ast::ASTNode(ast::NodeType::StringLiteral);
+            str_node->node_id = next_node_id_++;
+            str_node->primary_text = copy_to_arena(current_token_->value);
+            str_node->parent = dt_node;
+            dt_node->first_child = str_node;
+            dt_node->child_count = 1;
+
+            advance(); // consume the literal string
+            return dt_node;
         }
     }
-    
+
     // Handle identifiers (could be column, function, or simple identifier)
     // Also handle keywords that can be used as identifiers (e.g., date, time, level)
     if (current_token_->type == tokenizer::TokenType::Identifier ||
@@ -427,6 +456,27 @@ ast::ASTNode* Parser::parse_primary_expression() {
                 advance();  // consume ')'
             }
             return row_node;
+        }
+
+        // Niladic datetime functions - CURRENT_DATE / CURRENT_TIME /
+        // CURRENT_TIMESTAMP - are written WITHOUT parentheses but are functions,
+        // not columns. Emit a no-arg FunctionCall so the analyzer types them
+        // (CURRENT_DATE -> Date, CURRENT_TIMESTAMP -> Timestamp) instead of
+        // reporting an unresolved column reference.
+        {
+            std::string u;
+            u.reserve(current_token_->value.size());
+            for (char c : current_token_->value) {
+                u.push_back((c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c);
+            }
+            if (u == "CURRENT_DATE" || u == "CURRENT_TIME" || u == "CURRENT_TIMESTAMP") {
+                auto* fn = arena_.allocate<ast::ASTNode>();
+                new (fn) ast::ASTNode(ast::NodeType::FunctionCall);
+                fn->node_id = next_node_id_++;
+                fn->primary_text = copy_to_arena(current_token_->value);
+                advance();  // consume the niladic-function name
+                return fn;
+            }
         }
 
         // Look ahead using peek_token_
@@ -1486,45 +1536,21 @@ ast::ASTNode* Parser::parse_extract_expression() {
     }
     advance(); // consume FROM
     
-    // Parse the temporal expression
-    // Since FROM was already consumed, we can parse normally
+    // Parse the temporal expression as a full expression, terminated by the
+    // closing ')'. It may be a column, a qualified column, a niladic datetime
+    // function (CURRENT_DATE), a function call, an arithmetic expression, or a
+    // TYPED LITERAL - DATE '2020-01-01' / INTERVAL '3 days'. The previous
+    // column-only operand parser took the leading type keyword of a typed literal
+    // as a bare column and left the literal dangling, so a legal
+    // `EXTRACT(YEAR FROM DATE '2020-01-01')` failed to parse.
     ast::ASTNode* temporal_expr = nullptr;
-    
-    // Parse expression until closing parenthesis
-    // Most commonly this is a column reference or simple expression
     if (current_token_ && current_token_->value != ")") {
-        // Check if it's a simple identifier/column
-        if (current_token_->type == tokenizer::TokenType::Identifier) {
-            // Check for qualified column (table.column)
-            if (peek_token_ && peek_token_->value == ".") {
-                temporal_expr = parse_column_ref();
-            } else {
-                // Unqualified column reference
-                auto* col_ref = arena_.allocate<ast::ASTNode>();
-                new (col_ref) ast::ASTNode(ast::NodeType::ColumnRef);
-                col_ref->node_id = next_node_id_++;
-                col_ref->primary_text = copy_to_arena(current_token_->value);
-                advance();
-                temporal_expr = col_ref;
-            }
-        } else if (current_token_->type == tokenizer::TokenType::Keyword) {
-            // Some keywords can be column names
-            auto* col_ref = arena_.allocate<ast::ASTNode>();
-            new (col_ref) ast::ASTNode(ast::NodeType::ColumnRef);
-            col_ref->node_id = next_node_id_++;
-            col_ref->primary_text = copy_to_arena(current_token_->value);
-            advance();
-            temporal_expr = col_ref;
-        } else if (current_token_->value == "(") {
-            // Could be a nested expression or function
-            temporal_expr = parse_primary_expression();
-        } else {
-            // Try to parse as a general expression
-            // But we need to be careful about stopping at the closing paren
-            temporal_expr = parse_primary_expression();
+        temporal_expr = parse_expression(0);
+        if (!temporal_expr) {
+            return nullptr;
         }
     }
-    
+
     // Expect closing parenthesis
     if (!current_token_ || current_token_->value != ")") {
         return nullptr;
