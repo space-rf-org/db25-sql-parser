@@ -252,6 +252,49 @@ TEST_F(AdvancedTypesTest, ArrayCastInNestedContexts) {
     EXPECT_TRUE(contains_text(cast, "[]")) << "type node records array-ness";
 }
 
+// The `::type` array-suffix consumer must be LINEAR in the number of `[]`
+// dimensions. It once rebuilt the whole (growing) type string on every `[]`,
+// which is O(N^2) time and O(N^2) never-freed arena memory - a large but legal
+// `x::int[][]...[]` exhausted memory. This pins both the exact multi-dimension
+// type text (a few dims) and that a large-dimension cast parses cheaply and
+// records the full suffix (the quadratic version would take seconds / ~1 GB at
+// this size).
+TEST_F(AdvancedTypesTest, ArrayCastDimensionSuffixIsLinear) {
+    // Exact suffix for 2 and 3 dimensions.
+    for (auto [sql, want] : std::initializer_list<std::pair<const char*, const char*>>{
+             {"SELECT x::int[]", "int[]"},
+             {"SELECT x::int[][]", "int[][]"},
+             {"SELECT x::int[][][]", "int[][][]"}}) {
+        auto r = parser.parse(sql);
+        ASSERT_TRUE(r.has_value()) << sql;
+        auto* c = find_node_type(r.value(), NodeType::CastExpr);
+        ASSERT_NE(c, nullptr) << sql;
+        EXPECT_TRUE(contains_text(c, want)) << "type text should be " << want;
+        parser.reset();
+    }
+
+    // Large-dimension cast: 4000 `[]` pairs. Linear -> parses instantly; the
+    // old quadratic path would take seconds and hundreds of MB.
+    const std::size_t kDims = 4000;
+    std::string sql = "SELECT x::int";
+    sql.reserve(sql.size() + kDims * 2 + 8);
+    for (std::size_t i = 0; i < kDims; ++i) {
+        sql += "[]";
+    }
+    auto big = parser.parse(sql);
+    ASSERT_TRUE(big.has_value()) << "large multi-dimension array cast must parse";
+    auto* bc = find_node_type(big.value(), NodeType::CastExpr);
+    ASSERT_NE(bc, nullptr);
+    // Full suffix recorded: base "int" + kDims * "[]".
+    std::string expect_suffix(kDims * 2, ' ');
+    for (std::size_t i = 0; i < kDims; ++i) {
+        expect_suffix[2 * i] = '[';
+        expect_suffix[2 * i + 1] = ']';
+    }
+    EXPECT_TRUE(contains_text(bc, expect_suffix))
+        << "every dimension of a large array cast must be recorded";
+}
+
 // ============================================================================
 // Summary Test
 // ============================================================================
