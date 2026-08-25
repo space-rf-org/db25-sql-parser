@@ -850,7 +850,16 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
             // LIKE / ILIKE pattern or NOT LIKE / NOT ILIKE pattern
             if (op_keyword_id == db25::Keyword::LIKE ||
                 op_keyword_id == db25::Keyword::ILIKE) {
-                auto* pattern = parse_expression(precedence + 1);
+                // LIKE is precedence 3 (below comparison), but its PATTERN must
+                // bind TIGHTER than comparison so `x LIKE '%a%' = TRUE` parses as
+                // `(x LIKE '%a%') = TRUE`, not `x LIKE ('%a%' = TRUE)`. Parsing at
+                // `precedence + 1` (= 4, PREC_COMP) wrongly folded the trailing
+                // `= TRUE` into the pattern. Parse at PREC_COMP + 1, exactly as
+                // BETWEEN parses its bounds, so comparison operators are left for
+                // the outer loop while concat/arithmetic still bind into the
+                // pattern.
+                constexpr int kComparisonOperandPrec = 5;  // PREC_COMP + 1
+                auto* pattern = parse_expression(kComparisonOperandPrec);
                 if (!pattern) return left;
 
                 auto* like_node = arena_.allocate<ast::ASTNode>();
@@ -883,7 +892,10 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                     current_token_->type == tokenizer::TokenType::Keyword &&
                     current_token_->keyword_id == db25::Keyword::ESCAPE) {
                     advance();  // consume ESCAPE
-                    if (auto* escape = parse_expression(precedence + 1)) {
+                    // Same reasoning as the pattern: parse the ESCAPE operand at
+                    // PREC_COMP + 1 so a trailing comparison is left for the outer
+                    // loop rather than folded into the escape expression.
+                    if (auto* escape = parse_expression(5 /* PREC_COMP + 1 */)) {
                         escape->parent = like_node;
                         pattern->next_sibling = escape;
                         like_node->child_count = 3;
@@ -1253,8 +1265,39 @@ ast::ASTNode* Parser::parse_cast_expression() {
                 type_node->schema_name = copy_to_arena(type_params);
             }
         }
+
+        // Array type suffix `[]` (optionally sized / multi-dimensional), e.g.
+        // CAST(x AS int[]) / CAST(x AS int[][]). Mirror the `::type` postfix cast
+        // (parse_cast_postfix): count the `[]` pairs, then append the whole suffix
+        // ONCE (linear, not quadratic) and set the array-type flag. Without this,
+        // CAST(x AS int[]) was rejected while the equivalent x::int[] was accepted,
+        // and embedding it in a larger statement silently truncated the rest.
+        std::size_t array_dims = 0;
+        while (current_token_ && current_token_->value == "[") {
+            advance();  // consume [
+            if (current_token_ &&
+                current_token_->type == tokenizer::TokenType::Number) {
+                advance();  // optional array size, ignored (as in DDL / ::cast)
+            }
+            if (current_token_ && current_token_->value == "]") {
+                advance();  // consume ]
+                ++array_dims;
+            } else {
+                break;  // malformed: leave it for the error path below
+            }
+        }
+        if (array_dims > 0) {
+            type_node->flags = static_cast<ast::NodeFlags>(
+                static_cast<uint8_t>(type_node->flags) | 0x80);  // array-type flag
+            std::string type_text{type_node->primary_text};
+            type_text.reserve(type_text.size() + array_dims * 2);
+            for (std::size_t i = 0; i < array_dims; ++i) {
+                type_text += "[]";
+            }
+            type_node->primary_text = copy_to_arena(type_text);
+        }
     }
-    
+
     // Expect closing parenthesis
     if (!current_token_ || current_token_->value != ")") {
         return nullptr;
