@@ -2166,6 +2166,23 @@ ast::ASTNode* Parser::parse_function_call() {
     }
     pop_context();
 
+    // WITHIN GROUP (ORDER BY ...) - an ordered-set / hypothetical-set aggregate
+    // (percentile_cont / percentile_disc / mode / rank ...). Not supported yet,
+    // and it MUST be rejected here, not silently mis-parsed: the postfix handling
+    // below covers only FILTER and OVER, so a WITHIN token would be left
+    // unconsumed, the select-list / statement parser would stop at it, and the
+    // parser's leftover-token tolerance would DISCARD the whole
+    // `WITHIN GROUP (ORDER BY ...) FROM ... WHERE ...` tail while reporting
+    // success - dropping the ordering key AND every following clause into a wrong
+    // AST with no diagnostic. Reject cleanly instead, exactly as with
+    // OVER <named-window> and DISTINCT ON (ordered-set aggregate support is a
+    // separate feature).
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        current_token_->keyword_id == db25::Keyword::WITHIN) {
+        error("ordered-set aggregate (WITHIN GROUP (ORDER BY ...)) is not supported");
+        return nullptr;
+    }
+
     // Optional aggregate FILTER (WHERE predicate) clause, e.g.
     //   COUNT(*) FILTER (WHERE amount > 0)
     // Sits between the argument list and any OVER clause. The predicate is
