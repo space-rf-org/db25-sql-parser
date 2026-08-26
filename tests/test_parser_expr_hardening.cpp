@@ -454,6 +454,59 @@ TEST_F(ExprHardeningTest, AggregateWithoutFilterHasNoWhereClause) {
         EXPECT_NE(c->node_type, NodeType::WhereClause);
 }
 
+// ---- Ordered aggregates (ORDER BY inside the argument list) ----------------
+
+TEST_F(ExprHardeningTest, OrderedAggregateAttachesOrderByClause) {
+    // array_agg(x ORDER BY y): the ORDER BY orders the aggregated input and
+    // attaches as an OrderByClause child of the call, after the argument and
+    // distinct from it. Previously this failed to parse ("Unclosed parenthesis").
+    auto* ast = parse("SELECT array_agg(x ORDER BY y) FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* call = find(ast, NodeType::FunctionCall);
+    ASSERT_NE(call, nullptr);
+    EXPECT_EQ(call->primary_text, "array_agg");
+    // The argument x comes first; the OrderByClause is a later child.
+    ASTNode* order_by = nullptr;
+    for (auto* c = call->first_child; c; c = c->next_sibling)
+        if (c->node_type == NodeType::OrderByClause) { order_by = c; break; }
+    ASSERT_NE(order_by, nullptr) << "ORDER BY should attach an OrderByClause child";
+    // Its first item is the sort key y.
+    ASSERT_NE(order_by->first_child, nullptr);
+    // The FROM clause survived (the ORDER BY did not swallow the rest / was not
+    // dropped by leftover-token tolerance).
+    EXPECT_NE(find(ast, NodeType::FromClause), nullptr) << "FROM must still parse";
+}
+
+TEST_F(ExprHardeningTest, OrderedAggregateWithMultipleArgsAndDesc) {
+    // string_agg(v, ',' ORDER BY v DESC): two arguments then an ORDER BY DESC.
+    auto* ast = parse("SELECT string_agg(v, ',' ORDER BY v DESC) FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* call = find(ast, NodeType::FunctionCall);
+    ASSERT_NE(call, nullptr);
+    EXPECT_EQ(call->primary_text, "string_agg");
+    ASTNode* order_by = nullptr;
+    int args = 0;
+    for (auto* c = call->first_child; c; c = c->next_sibling) {
+        if (c->node_type == NodeType::OrderByClause) order_by = c;
+        else ++args;
+    }
+    EXPECT_EQ(args, 2) << "both string_agg arguments must remain";
+    ASSERT_NE(order_by, nullptr);
+    // DESC is recorded on the sort item (bit 7 of semantic_flags).
+    ASSERT_NE(order_by->first_child, nullptr);
+    EXPECT_TRUE(order_by->first_child->semantic_flags & (1 << 7)) << "DESC flag set";
+}
+
+TEST_F(ExprHardeningTest, PlainAggregateHasNoOrderByClause) {
+    // Regression guard: a plain aggregate has no OrderByClause child.
+    auto* ast = parse("SELECT array_agg(x) FROM t");
+    ASSERT_NE(ast, nullptr);
+    auto* call = find(ast, NodeType::FunctionCall);
+    ASSERT_NE(call, nullptr);
+    for (auto* c = call->first_child; c; c = c->next_sibling)
+        EXPECT_NE(c->node_type, NodeType::OrderByClause);
+}
+
 // ---- Row constructors ------------------------------------------------------
 
 TEST_F(ExprHardeningTest, BareTupleBuildsRowConstructor) {
