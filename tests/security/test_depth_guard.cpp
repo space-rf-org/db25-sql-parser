@@ -94,7 +94,62 @@ std::string generate_nested_triggers_block(int depth) {
     return sql.str();
 }
 
+// Generate a FLAT (unparenthesised) left-deep set-operation chain:
+// SELECT 1 UNION SELECT 1 UNION ... (count operators). This is folded in a single
+// linear pass (fold_set_operations), NOT through the per-level DepthGuard, yet it
+// produces a `count`-deep left-nested AST that every downstream stage walks
+// recursively - so the fold must apply the same depth cap.
+std::string generate_setop_chain(int ops) {
+    std::stringstream sql;
+    sql << "SELECT 1";
+    for (int i = 0; i < ops; ++i) {
+        sql << " UNION SELECT 1";
+    }
+    return sql.str();
+}
+
 }  // namespace
+
+// A flat set-op chain within the limit parses (the AST is bounded, so the
+// analyzer / binder / optimizer can walk it without overflow).
+TEST(DepthGuard, ShallowSetOpChainParses) {
+    Parser parser;
+    auto result = parser.parse(generate_setop_chain(50));
+    ASSERT_TRUE(result.has_value())
+        << "Shallow set-op chain should parse, got error: " << result.error().message;
+}
+
+// A flat set-op chain longer than the depth limit must be rejected gracefully
+// with the standard depth error - NOT accepted to build an unbounded left-deep
+// AST that stack-overflows analyze_setop / bind_setop / the optimizer passes on
+// otherwise-legal input.
+TEST(DepthGuard, DeepSetOpChainRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    auto result = parser.parse(generate_setop_chain(static_cast<int>(limit) * 3));
+    ASSERT_FALSE(result.has_value())
+        << "Deep flat set-op chain must be rejected by the depth cap";
+    EXPECT_EQ(result.error().message, kDepthError);
+}
+
+// The cap sits exactly at max_depth: a chain of `max_depth` operators is accepted,
+// one more is rejected. Uses a small custom limit so the boundary is cheap to hit.
+TEST(DepthGuard, SetOpChainBoundaryHonored) {
+    Parser parser;
+    ParserConfig config = parser.config();
+    config.max_depth = 40;
+    parser.set_config(config);
+
+    auto ok = parser.parse(generate_setop_chain(40));
+    ASSERT_TRUE(ok.has_value())
+        << "A chain of exactly max_depth operators should parse, got: "
+        << (ok.has_value() ? std::string{} : ok.error().message);
+
+    auto bad = parser.parse(generate_setop_chain(41));
+    ASSERT_FALSE(bad.has_value())
+        << "One operator past max_depth must be rejected";
+    EXPECT_EQ(bad.error().message, kDepthError);
+}
 
 // A shallow chain of nested triggers stays under the limit and must parse. This
 // also confirms the recursion is real (each CREATE TRIGGER body can itself be a

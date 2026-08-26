@@ -724,6 +724,24 @@ ast::ASTNode* Parser::parse_parenthesized_query() {
 // ORDER BY / LIMIT). A trailing ORDER BY / LIMIT after the whole chain binds to
 // the combined result and is attached here.
 ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
+    // A flat set-op chain (`A UNION B UNION C ...`) is folded here in one linear
+    // pass, so - unlike a parenthesized-nested query, which re-enters the
+    // DepthGuarded parse_select_stmt per level - it is NOT bounded by the normal
+    // recursion depth guard. The chain produces a left-deep AST, and every
+    // downstream stage that walks it (analyzer analyze_setop, binder bind_setop,
+    // the optimizer passes) recurses one frame per operator, so an unbounded chain
+    // stack-overflows them on otherwise-legal input. Cap the folded operator count
+    // at the same max_depth used for recursion and surface the standard
+    // depth-exceeded error - an honest rejection instead of a deep-tree crash.
+    std::size_t setop_depth = 0;
+    const auto over_setop_limit = [&]() -> bool {
+        if (++setop_depth > config_.max_depth) {
+            depth_exceeded_ = true;
+            return true;
+        }
+        return false;
+    };
+
     // Parse one operand: a parenthesized query block, or a bare SELECT branch.
     auto parse_setop_operand = [&]() -> ast::ASTNode* {
         if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
@@ -801,6 +819,9 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
             if (!right) {
                 break;  // malformed RHS: keep the tree folded so far
             }
+            if (over_setop_limit()) {
+                break;  // chain too deep: stop folding; parse() surfaces the error
+            }
             left = make_setop_node(keyword, ast::NodeType::IntersectStmt, left, right, all);
         }
         return left;
@@ -848,6 +869,9 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
         // The RHS binds any trailing INTERSECT chain before we fold at this level.
         ast::ASTNode* right = fold_intersects(right_operand);
 
+        if (over_setop_limit()) {
+            break;  // chain too deep: stop folding; parse() surfaces the error
+        }
         left = make_setop_node(keyword, set_op_type, left, right, all);
     }
 
