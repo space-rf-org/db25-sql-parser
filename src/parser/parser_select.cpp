@@ -2182,7 +2182,35 @@ ast::ASTNode* Parser::parse_function_call() {
                 break;
             }
         }
-        
+
+        // Ordered aggregate: an ORDER BY inside the argument list orders the
+        // aggregated input, e.g. `array_agg(x ORDER BY y)`,
+        // `string_agg(v, ',' ORDER BY v DESC)`. PostgreSQL allows this for any
+        // aggregate. Parse it into an OrderByClause child so the analyzer/binder
+        // can carry the ordering; it sits after the arguments and is told apart
+        // from them by its node type. (This is DISTINCT from WITHIN GROUP
+        // (ORDER BY ...) below - the ordered-SET aggregate form - which remains
+        // unsupported. Here the ORDER BY is inside the argument parens.)
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+            current_token_->keyword_id == db25::Keyword::ORDER) {
+            advance();  // consume ORDER
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                current_token_->keyword_id == db25::Keyword::BY) {
+                advance();  // consume BY
+                if (ast::ASTNode* order_by = parse_order_by_clause()) {
+                    order_by->parent = func_call;
+                    if (!func_call->first_child) {
+                        func_call->first_child = order_by;
+                    } else {
+                        ast::ASTNode* last = func_call->first_child;
+                        while (last->next_sibling) last = last->next_sibling;
+                        last->next_sibling = order_by;
+                    }
+                    func_call->child_count++;
+                }
+            }
+        }
+
         if (current_token_ && current_token_->value == ")") {
             if (parenthesis_depth_ > 0) parenthesis_depth_--;
             advance(); // consume ')'
