@@ -16,6 +16,7 @@
 #include <atomic>
 #include <algorithm>
 #include <numeric>
+#include <limits>   // std::numeric_limits (best-of-N minimum in the timing tests)
 #include <cstring>  // std::memset (no longer transitively included under GCC 14+)
 
 using namespace db25;
@@ -29,33 +30,42 @@ protected:
 
 // ============= Performance Tests =============
 
+// Best-of-N minimum. A single wall-clock sample of the allocation loop is
+// flaky on a shared / virtualised CI runner: a scheduler preemption or a
+// co-tenant stealing the core mid-loop spikes THAT sample above the budget even
+// though the arena (a pointer bump) is unchanged. Such noise can only make a
+// sample SLOWER, never faster, so the MINIMUM over several repetitions is a
+// stable estimate of true throughput - and a genuine algorithmic regression
+// (e.g. the bump becoming O(n), or per-alloc bookkeeping creeping in) still
+// exceeds the budget on every repetition, so it is still caught. The budget
+// itself is unchanged.
+static constexpr int kTimingReps = 7;
+
 TEST_F(ArenaStressTest, AllocationSpeed) {
-    Arena arena;
-    
-    auto start = high_resolution_clock::now();
-    
-    for (size_t i = 0; i < STRESS_ITERATIONS; ++i) {
-        [[maybe_unused]] void* ptr = arena.allocate(64);
+    double best_ns = std::numeric_limits<double>::max();
+    for (int rep = 0; rep < kTimingReps; ++rep) {
+        Arena arena;
+        auto start = high_resolution_clock::now();
+        for (size_t i = 0; i < STRESS_ITERATIONS; ++i) {
+            [[maybe_unused]] void* ptr = arena.allocate(64);
+        }
+        auto end = high_resolution_clock::now();
+        const double ns =
+            static_cast<double>(duration_cast<nanoseconds>(end - start).count()) /
+            STRESS_ITERATIONS;
+        best_ns = std::min(best_ns, ns);
     }
-    
-    auto end = high_resolution_clock::now();
-    auto duration = duration_cast<nanoseconds>(end - start);
-    
-    double ns_per_alloc = static_cast<double>(duration.count()) / STRESS_ITERATIONS;
-    
-    std::cout << "Allocation performance:\n"
-              << "  Time per allocation: " << ns_per_alloc << " ns\n"
-              << "  Allocations per second: " 
-              << (1e9 / ns_per_alloc) << "\n"
-              << "  Total allocated: " << arena.total_allocated() << " bytes\n"
-              << "  Utilization: " << (arena.utilization() * 100) << "%\n";
-    
-    // Target: < 5ns per allocation as per design.
+
+    std::cout << "Allocation performance (best of " << kTimingReps << "):\n"
+              << "  Time per allocation: " << best_ns << " ns\n"
+              << "  Allocations per second: " << (1e9 / best_ns) << "\n";
+
+    // Target: < 5ns per allocation as per design (budget < 10ns).
     // Absolute-nanosecond budgets are only meaningful in optimized builds;
-    // -O0 debug builds and slower/virtualised CI run well above them, so the
-    // assertion is enforced only under NDEBUG and skipped otherwise.
+    // -O0 debug builds run well above them, so the assertion is enforced only
+    // under NDEBUG and skipped otherwise.
 #ifdef NDEBUG
-    EXPECT_LT(ns_per_alloc, 10.0)
+    EXPECT_LT(best_ns, 10.0)
         << "Allocation should be < 10ns (target is < 5ns)";
 #else
     GTEST_SKIP() << "Timing assertion only enforced in optimized (NDEBUG) builds";
@@ -63,25 +73,30 @@ TEST_F(ArenaStressTest, AllocationSpeed) {
 }
 
 TEST_F(ArenaStressTest, MixedSizeAllocationSpeed) {
-    Arena arena;
-    std::mt19937 gen(42);
-    std::uniform_int_distribution<size_t> size_dist(1, 256);
-    
-    auto start = high_resolution_clock::now();
-    
-    for (size_t i = 0; i < STRESS_ITERATIONS; ++i) {
-        [[maybe_unused]] void* ptr = arena.allocate(size_dist(gen));
+    // Best-of-N minimum, for the same CI-jitter reason as AllocationSpeed above.
+    // Each repetition re-seeds the size distribution identically, so every rep
+    // does the same work and only scheduling noise varies between them.
+    double best_ns = std::numeric_limits<double>::max();
+    for (int rep = 0; rep < kTimingReps; ++rep) {
+        Arena arena;
+        std::mt19937 gen(42);
+        std::uniform_int_distribution<size_t> size_dist(1, 256);
+        auto start = high_resolution_clock::now();
+        for (size_t i = 0; i < STRESS_ITERATIONS; ++i) {
+            [[maybe_unused]] void* ptr = arena.allocate(size_dist(gen));
+        }
+        auto end = high_resolution_clock::now();
+        const double ns =
+            static_cast<double>(duration_cast<nanoseconds>(end - start).count()) /
+            STRESS_ITERATIONS;
+        best_ns = std::min(best_ns, ns);
     }
-    
-    auto end = high_resolution_clock::now();
-    auto duration = duration_cast<nanoseconds>(end - start);
-    
-    double ns_per_alloc = static_cast<double>(duration.count()) / STRESS_ITERATIONS;
-    
-    std::cout << "Mixed size allocation: " << ns_per_alloc << " ns per allocation\n";
+
+    std::cout << "Mixed size allocation (best of " << kTimingReps << "): "
+              << best_ns << " ns per allocation\n";
 
 #ifdef NDEBUG
-    EXPECT_LT(ns_per_alloc, 15.0)
+    EXPECT_LT(best_ns, 15.0)
         << "Mixed size allocation should still be fast";
 #else
     GTEST_SKIP() << "Timing assertion only enforced in optimized (NDEBUG) builds";
