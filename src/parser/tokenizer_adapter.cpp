@@ -52,6 +52,11 @@ void Tokenizer::tokenize() {
         token.keyword_id = raw_token.keyword_id;
         token.line = raw_token.line;
         token.column = raw_token.column;
+        // Carry the delimited-identifier flag through: a double-quoted
+        // `"current_date"` is a plain column, and the parser relies on this bit
+        // to refuse to promote it to a niladic function. Dropping it here (the
+        // field defaults false) would silently defeat that check.
+        token.delimited = raw_token.delimited;
         tokens_.push_back(token);
     }
 

@@ -463,7 +463,12 @@ ast::ASTNode* Parser::parse_primary_expression() {
         // not columns. Emit a no-arg FunctionCall so the analyzer types them
         // (CURRENT_DATE -> Date, CURRENT_TIMESTAMP -> Timestamp) instead of
         // reporting an unresolved column reference.
-        {
+        //
+        // A DELIMITED identifier (`"current_date"`) is an ordinary column named
+        // current_date, never the function - the double quotes are precisely the
+        // SQL way to force that reading. The tokenizer flags it; skip the niladic
+        // promotion for it and fall through to plain column-reference handling.
+        if (!current_token_->delimited) {
             std::string u;
             u.reserve(current_token_->value.size());
             for (char c : current_token_->value) {

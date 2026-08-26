@@ -363,6 +363,21 @@ TEST_F(AdvancedTypesTest, TemporalLiteralsAndNiladicFunctions) {
         parser.reset();
     }
 
+    // A DELIMITED identifier "current_date" is an ordinary column, NOT the
+    // niladic function - the double quotes are exactly how SQL forces the
+    // column reading. The tokenizer flags it; the parser must not promote it.
+    for (const char* sql : {"SELECT \"current_date\" FROM t",
+                            "SELECT \"CURRENT_TIMESTAMP\" FROM t"}) {
+        auto r = parser.parse(sql);
+        ASSERT_TRUE(r.has_value()) << sql;
+        auto* list = find_node_type(r.value(), NodeType::SelectList);
+        ASSERT_NE(list, nullptr);
+        ASSERT_NE(list->first_child, nullptr);
+        EXPECT_NE(list->first_child->node_type, NodeType::FunctionCall)
+            << sql << " is a delimited identifier (a column), not a niladic function";
+        parser.reset();
+    }
+
     // EXTRACT over a typed literal / niladic function / arithmetic now parses.
     for (const char* sql : {
             "SELECT EXTRACT(YEAR FROM DATE '2020-01-01')",
