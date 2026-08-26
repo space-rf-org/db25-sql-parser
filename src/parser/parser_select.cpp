@@ -2194,21 +2194,31 @@ ast::ASTNode* Parser::parse_function_call() {
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
             current_token_->keyword_id == db25::Keyword::ORDER) {
             advance();  // consume ORDER
-            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-                current_token_->keyword_id == db25::Keyword::BY) {
-                advance();  // consume BY
-                if (ast::ASTNode* order_by = parse_order_by_clause()) {
-                    order_by->parent = func_call;
-                    if (!func_call->first_child) {
-                        func_call->first_child = order_by;
-                    } else {
-                        ast::ASTNode* last = func_call->first_child;
-                        while (last->next_sibling) last = last->next_sibling;
-                        last->next_sibling = order_by;
-                    }
-                    func_call->child_count++;
-                }
+            // ORDER must be followed by BY and at least one sort key. An
+            // incomplete `array_agg(x ORDER)` / `array_agg(x ORDER BY)` is a
+            // syntax error (PostgreSQL rejects it); without this the consumed
+            // ORDER/BY were silently dropped and the call parsed as an unordered
+            // aggregate. Reject cleanly, as the WITHIN GROUP / DISTINCT ON paths do.
+            if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
+                current_token_->keyword_id != db25::Keyword::BY) {
+                error("expected BY after ORDER in an aggregate argument list");
+                return nullptr;
             }
+            advance();  // consume BY
+            ast::ASTNode* order_by = parse_order_by_clause();
+            if (order_by == nullptr) {
+                error("expected a sort key after ORDER BY in an aggregate argument list");
+                return nullptr;
+            }
+            order_by->parent = func_call;
+            if (!func_call->first_child) {
+                func_call->first_child = order_by;
+            } else {
+                ast::ASTNode* last = func_call->first_child;
+                while (last->next_sibling) last = last->next_sibling;
+                last->next_sibling = order_by;
+            }
+            func_call->child_count++;
         }
 
         if (current_token_ && current_token_->value == ")") {

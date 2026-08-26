@@ -507,6 +507,18 @@ TEST_F(ExprHardeningTest, PlainAggregateHasNoOrderByClause) {
         EXPECT_NE(c->node_type, NodeType::OrderByClause);
 }
 
+TEST_F(ExprHardeningTest, IncompleteOrderedAggregateIsRejected) {
+    // An aggregate ORDER BY with no sort key (or no BY) is a syntax error, not a
+    // silently-accepted plain aggregate. Previously the ORDER/BY tokens were
+    // consumed and dropped and the statement parsed OK.
+    EXPECT_FALSE(parser->parse("SELECT array_agg(x ORDER BY) FROM t").has_value())
+        << "array_agg(x ORDER BY) with no sort key must be rejected";
+    EXPECT_FALSE(parser->parse("SELECT array_agg(x ORDER) FROM t").has_value())
+        << "array_agg(x ORDER) with no BY must be rejected";
+    // A complete ordered aggregate still parses (guard against over-rejection).
+    EXPECT_TRUE(parser->parse("SELECT array_agg(x ORDER BY y) FROM t").has_value());
+}
+
 // ---- Row constructors ------------------------------------------------------
 
 TEST_F(ExprHardeningTest, BareTupleBuildsRowConstructor) {
