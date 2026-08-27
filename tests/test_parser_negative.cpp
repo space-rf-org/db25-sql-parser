@@ -257,6 +257,52 @@ TEST(ParserNegativeTest, ValidArrayConstructorsStillParse) {
     EXPECT_TRUE(parser.parse("SELECT ARRAY[a, b] FROM t").has_value());
 }
 
+// More break-on-null recovery loops that silently truncated a statement while
+// parse() returned success, none caught by the has_error_ backstop (they never
+// called error()) nor the paren-balance check:
+//   - a comma-separated FROM item that fails to parse (an unsupported form the
+//     FROM parser emits no node for, e.g. comma-form LATERAL) was dropped and
+//     the tail left as trailing tokens;
+//   - a set operator (UNION/INTERSECT/EXCEPT) whose right query fails to parse
+//     was erased, yielding the bare left arm;
+//   - an UPDATE ... SET assignment with a missing value after `=` emitted a
+//     value-less assignment node.
+TEST(ParserNegativeTest, SilentlyTruncatedFromSetopUpdateRejected) {
+    // FROM item after a comma.
+    expect_parse_error("SELECT * FROM users u, LATERAL (SELECT 1) l");
+    expect_parse_error("SELECT * FROM a, WHERE x");
+    expect_parse_error("SELECT * FROM a,");
+    // Set-operator right-hand side (UNION / INTERSECT / EXCEPT, incl. chains).
+    expect_parse_error("SELECT a FROM t UNION");
+    expect_parse_error("SELECT a FROM t UNION SELECT");
+    expect_parse_error("SELECT a FROM t INTERSECT");
+    expect_parse_error("SELECT a FROM t EXCEPT ALL");
+    expect_parse_error("SELECT 1 UNION SELECT 2 UNION");
+    // UPDATE ... SET value.
+    expect_parse_error("UPDATE t SET a = WHERE id = 1");
+    expect_parse_error("UPDATE t SET a = 1, b = WHERE id = 1");
+    expect_parse_error("UPDATE t SET a =");
+}
+
+// Guards: well-formed comma FROM lists, set operations, and UPDATE assignments
+// still parse.
+TEST(ParserNegativeTest, ValidFromSetopUpdateStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT * FROM a, b, c").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a FROM t UNION SELECT b FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a FROM t UNION ALL SELECT b FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a FROM t INTERSECT SELECT b FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT 1 UNION SELECT 2 UNION SELECT 3").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("UPDATE t SET a = 1, b = 2 WHERE id = 1").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("UPDATE t SET a = b + 1").has_value());
+}
+
 // Guards: real `::type` casts and COLLATE names (which ARE keywords for the
 // types, but not clause keywords) still parse - including parameterized types.
 TEST(ParserNegativeTest, RealCastAndCollateStillParse) {
