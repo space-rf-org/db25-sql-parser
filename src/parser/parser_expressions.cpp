@@ -12,6 +12,28 @@
 
 namespace db25::parser {
 
+namespace {
+// A clause-introducing keyword terminates an expression - it is never a value
+// operand, a cast type name, or a collation name. This is the same set
+// get_precedence() stops the operator loop on. Reserved-but-usable keywords
+// (type names like INTEGER/DATE/TIMESTAMP, collation names) are NOT in this set,
+// so they keep parsing.
+[[nodiscard]] bool is_clause_boundary_keyword(db25::Keyword kw) noexcept {
+    switch (kw) {
+        case db25::Keyword::FROM:
+        case db25::Keyword::WHERE:
+        case db25::Keyword::GROUP:
+        case db25::Keyword::HAVING:
+        case db25::Keyword::ORDER:
+        case db25::Keyword::LIMIT:
+        case db25::Keyword::OFFSET:
+            return true;
+        default:
+            return false;
+    }
+}
+}  // namespace
+
 // ========== Primary Expression Parser ==========
 
 ast::ASTNode* Parser::parse_primary_expression() {
@@ -395,19 +417,9 @@ ast::ASTNode* Parser::parse_primary_expression() {
     // a ColumnRef, silently deleting the real clause and accepting a
     // structurally wrong statement. Reject here so the operand parse returns
     // null and the caller reports a syntax error.
-    if (current_token_->type == tokenizer::TokenType::Keyword) {
-        switch (current_token_->keyword_id) {
-            case db25::Keyword::FROM:
-            case db25::Keyword::WHERE:
-            case db25::Keyword::GROUP:
-            case db25::Keyword::HAVING:
-            case db25::Keyword::ORDER:
-            case db25::Keyword::LIMIT:
-            case db25::Keyword::OFFSET:
-                return nullptr;
-            default:
-                break;
-        }
+    if (current_token_->type == tokenizer::TokenType::Keyword &&
+        is_clause_boundary_keyword(current_token_->keyword_id)) {
+        return nullptr;
     }
 
     // Handle identifiers (could be column, function, or simple identifier)
@@ -1535,13 +1547,21 @@ ast::ASTNode* Parser::parse_collate_postfix(ast::ASTNode* operand,
         node->node_id = next_node_id_++;
         node->primary_text = copy_to_arena("COLLATE");
 
-        // The collation name is an identifier (bare or delimited) or a string.
+        // The collation name is an identifier (bare or delimited) or a string. A
+        // clause-introducing keyword (FROM/WHERE/...) is NOT a collation name, and
+        // a missing name is incomplete: `SELECT a COLLATE FROM t` must be a syntax
+        // error, not silently accepted with FROM swallowed as the collation and
+        // the FROM clause deleted.
         if (current_token_ &&
             (current_token_->type == tokenizer::TokenType::Identifier ||
-             current_token_->type == tokenizer::TokenType::Keyword ||
-             current_token_->type == tokenizer::TokenType::String)) {
+             current_token_->type == tokenizer::TokenType::String ||
+             (current_token_->type == tokenizer::TokenType::Keyword &&
+              !is_clause_boundary_keyword(current_token_->keyword_id)))) {
             node->schema_name = copy_to_arena(current_token_->value);
             advance();
+        } else {
+            error("expected a collation name after COLLATE");
+            return nullptr;
         }
 
         operand->parent = node;
@@ -1573,10 +1593,19 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand,
         }
         ++fold_depth;
         advance();  // consume ::
+        // A `::` must be followed by a type name. A clause-introducing keyword
+        // (FROM/WHERE/...) is NOT a type name, and a missing type is incomplete:
+        // `SELECT a:: FROM t` must be a syntax error, not silently accepted with
+        // FROM swallowed as the cast type and the FROM clause deleted. Real type
+        // keywords (INTEGER/DATE/TIMESTAMP/...) are not clause keywords, so they
+        // still parse.
         if (!current_token_ ||
             (current_token_->type != tokenizer::TokenType::Identifier &&
-             current_token_->type != tokenizer::TokenType::Keyword)) {
-            return operand;  // `::` without a type name: leave the value as-is
+             current_token_->type != tokenizer::TokenType::Keyword) ||
+            (current_token_->type == tokenizer::TokenType::Keyword &&
+             is_clause_boundary_keyword(current_token_->keyword_id))) {
+            error("expected a type name after '::'");
+            return nullptr;
         }
         auto* cast_node = arena_.allocate<ast::ASTNode>();
         new (cast_node) ast::ASTNode(ast::NodeType::CastExpr);

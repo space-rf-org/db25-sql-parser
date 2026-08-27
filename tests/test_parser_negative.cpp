@@ -105,6 +105,41 @@ TEST(ParserNegativeTest, IncompleteIsRejected) {
     expect_parse_error("SELECT * FROM t WHERE x IS NOT LIMIT 1");
 }
 
+// A `::type` cast whose type name is a reserved clause keyword (or is missing)
+// must be a syntax error, not silently accepted with the clause keyword swallowed
+// as a bogus type and the clause deleted. `SELECT a:: FROM t` used to yield
+// CastExpr[a, Identifier 'FROM'] with no FromClause.
+TEST(ParserNegativeTest, CastToClauseKeywordRejected) {
+    expect_parse_error("SELECT a:: FROM t");
+    expect_parse_error("SELECT a:: WHERE b");
+    expect_parse_error("SELECT a:: HAVING c FROM t");
+    expect_parse_error("SELECT a::");                 // missing type at end of input
+    expect_parse_error("SELECT a::int:: FROM t");     // chained cast, second is empty
+}
+
+// A COLLATE whose collation name is a reserved clause keyword (or is missing) is
+// likewise rejected, not silently accepted with the clause keyword swallowed.
+TEST(ParserNegativeTest, CollateToClauseKeywordRejected) {
+    expect_parse_error("SELECT a COLLATE FROM t");
+    expect_parse_error("SELECT a COLLATE WHERE b");
+    expect_parse_error("SELECT a COLLATE");           // missing collation name
+}
+
+// Guards: real `::type` casts and COLLATE names (which ARE keywords for the
+// types, but not clause keywords) still parse.
+TEST(ParserNegativeTest, RealCastAndCollateStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT a::int FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a::TIMESTAMP, b::DATE FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a::int::text FROM t WHERE b > 0").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT name COLLATE \"C\" FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a::int COLLATE \"C\" FROM t").has_value());
+}
+
 // Guards: well-formed BETWEEN / LIKE / IS predicates still parse.
 TEST(ParserNegativeTest, CompletePredicatesStillParse) {
     Parser parser;
