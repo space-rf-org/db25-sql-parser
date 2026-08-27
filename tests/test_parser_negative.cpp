@@ -366,6 +366,52 @@ TEST(ParserNegativeTest, ValidUpsertReturningStillParse) {
     EXPECT_TRUE(parser.parse("DELETE FROM t WHERE a = 1 RETURNING *").has_value());
 }
 
+// More missing-required-element / swallowed-token sites that returned a clean
+// parse on a truncated construct: CAST without a target type, EXTRACT without a
+// source expression, ORDER BY ... NULLS without FIRST/LAST, LIKE ... ESCAPE
+// without an escape character, and an empty IN value list.
+TEST(ParserNegativeTest, MoreMissingElementsRejected) {
+    // CAST(value AS <type>) - the type is mandatory.
+    expect_parse_error("SELECT CAST(1 AS)");
+    expect_parse_error("SELECT CAST(1 AS) FROM t WHERE y = 2");
+    // EXTRACT(field FROM <source>) - the source is mandatory.
+    expect_parse_error("SELECT EXTRACT(YEAR FROM)");
+    expect_parse_error("SELECT EXTRACT(YEAR FROM) FROM t");
+    // ORDER BY ... NULLS { FIRST | LAST } - the direction word is mandatory.
+    expect_parse_error("SELECT 1 ORDER BY x NULLS");
+    expect_parse_error("SELECT 1 ORDER BY x NULLS BOGUS");
+    expect_parse_error("SELECT 1 ORDER BY x, y NULLS");
+    // LIKE ... ESCAPE <char> - the escape character is mandatory.
+    expect_parse_error("SELECT a LIKE 'x' ESCAPE");
+    expect_parse_error("SELECT * FROM t WHERE a LIKE 'x' ESCAPE ORDER BY a");
+    // IN (...) - the value list must be non-empty.
+    expect_parse_error("SELECT a IN ()");
+    expect_parse_error("SELECT a IN (,)");
+    expect_parse_error("SELECT a NOT IN ()");
+}
+
+// Guard: the well-formed variants of all of the above still parse.
+TEST(ParserNegativeTest, ValidCastExtractNullsEscapeInStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT CAST(1 AS int)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT CAST(x AS VARCHAR(10)) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT EXTRACT(YEAR FROM d) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT EXTRACT(YEAR FROM DATE '2020-01-01')").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT 1 ORDER BY x NULLS FIRST").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT 1 ORDER BY x DESC NULLS LAST, y NULLS FIRST").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a LIKE 'x' ESCAPE '!' FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a IN (1, 2, 3) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a IN (SELECT b FROM t) FROM u").has_value());
+}
+
 // Guard: well-formed CASE expressions (searched and simple, with/without ELSE)
 // still parse.
 TEST(ParserNegativeTest, ValidCaseExpressionsStillParse) {

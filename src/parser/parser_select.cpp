@@ -1676,17 +1676,23 @@ ast::ASTNode* Parser::parse_order_by_clause() {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::NULLS) {
         advance(); // consume NULLS
-        
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
-            if (current_token_->keyword_id == db25::Keyword::FIRST) {
-                first_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
-                first_item->semantic_flags |= (1 << 4); // Set FIRST
-                advance();
-            } else if (current_token_->keyword_id == db25::Keyword::LAST) {
-                first_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
-                // bit 4 remains 0 for LAST
-                advance();
-            }
+
+        // FIRST or LAST is mandatory after NULLS: `ORDER BY x NULLS` (bare)
+        // previously swallowed the NULLS keyword and returned a clean parse
+        // identical to no NULLS at all. Standard SQL is NULLS { FIRST | LAST }.
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+            current_token_->keyword_id == db25::Keyword::FIRST) {
+            first_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
+            first_item->semantic_flags |= (1 << 4); // Set FIRST
+            advance();
+        } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                   current_token_->keyword_id == db25::Keyword::LAST) {
+            first_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
+            // bit 4 remains 0 for LAST
+            advance();
+        } else {
+            error("expected FIRST or LAST after NULLS");
+            return nullptr;
         }
     }
     
@@ -1729,17 +1735,21 @@ ast::ASTNode* Parser::parse_order_by_clause() {
         if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
             current_token_->keyword_id == db25::Keyword::NULLS) {
             advance(); // consume NULLS
-            
-            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword) {
-                if (current_token_->keyword_id == db25::Keyword::FIRST) {
-                    order_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
-                    order_item->semantic_flags |= (1 << 4); // Set FIRST
-                    advance();
-                } else if (current_token_->keyword_id == db25::Keyword::LAST) {
-                    order_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
-                    // bit 4 remains 0 for LAST
-                    advance();
-                }
+
+            // FIRST or LAST is mandatory after NULLS (see the first-item branch).
+            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                current_token_->keyword_id == db25::Keyword::FIRST) {
+                order_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
+                order_item->semantic_flags |= (1 << 4); // Set FIRST
+                advance();
+            } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+                       current_token_->keyword_id == db25::Keyword::LAST) {
+                order_item->semantic_flags |= (1 << 5); // Mark NULLS ordering as explicit
+                // bit 4 remains 0 for LAST
+                advance();
+            } else {
+                error("expected FIRST or LAST after NULLS");
+                return nullptr;
             }
         }
         
