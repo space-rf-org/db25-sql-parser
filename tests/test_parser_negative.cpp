@@ -82,6 +82,45 @@ TEST(ParserNegativeTest, JsonArrowOperatorsRejected) {
     expect_parse_error("SELECT data->>'key' FROM t WHERE id = 5");
 }
 
+// An incomplete BETWEEN / LIKE / ILIKE / IS predicate must be a syntax error, not
+// silently accepted with the consumed operator dropped and the following clause
+// stitched onto a corrupted statement. `WHERE x BETWEEN 1 GROUP BY y` used to
+// yield WhereClause[ColumnRef 'x'] (a bare truthiness test) plus a phantom GROUP BY.
+TEST(ParserNegativeTest, IncompleteBetweenRejected) {
+    expect_parse_error("SELECT * FROM t WHERE x BETWEEN 1 GROUP BY y");
+    expect_parse_error("SELECT * FROM t WHERE x BETWEEN 1");            // ends after low bound
+    expect_parse_error("SELECT * FROM t WHERE x BETWEEN 1 AND");        // ends after AND
+    expect_parse_error("SELECT * FROM t WHERE x NOT BETWEEN 1 ORDER BY y");
+}
+
+TEST(ParserNegativeTest, IncompleteLikeRejected) {
+    expect_parse_error("SELECT * FROM t WHERE a LIKE GROUP BY y");
+    expect_parse_error("SELECT * FROM t WHERE a ILIKE ORDER BY y");
+    expect_parse_error("SELECT * FROM t WHERE a LIKE");
+}
+
+TEST(ParserNegativeTest, IncompleteIsRejected) {
+    expect_parse_error("SELECT * FROM t WHERE x IS GROUP BY y");
+    expect_parse_error("SELECT * FROM t WHERE x IS");
+    expect_parse_error("SELECT * FROM t WHERE x IS NOT LIMIT 1");
+}
+
+// Guards: well-formed BETWEEN / LIKE / IS predicates still parse.
+TEST(ParserNegativeTest, CompletePredicatesStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE x BETWEEN 1 AND 10").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE x NOT BETWEEN 1 AND 10 GROUP BY y").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE a LIKE '%x%' ORDER BY a").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE x IS NULL").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE x IS NOT NULL AND y IS TRUE").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE x IS DISTINCT FROM y").has_value());
+}
+
 // Guards: legal binary minus / arithmetic and a legal negative literal still
 // parse - the reserved-keyword-operand and missing-RHS guards must not reject
 // well-formed expressions.
