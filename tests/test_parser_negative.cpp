@@ -161,6 +161,41 @@ TEST(ParserNegativeTest, UnclosedCastTypeParamsRejected) {
     expect_parse_error("SELECT x::DECIMAL(10, 2 FROM t");
 }
 
+// A malformed sub-expression inside a grouping element (ROLLUP/CUBE/GROUPING
+// SETS) or a VALUES row must FAIL the parse, not be silently dropped. Those
+// paths use break-on-null recovery loops that returned the enclosing node while
+// error() had already recorded a hard error - and parse() did not consult
+// has_error_ when the root was non-null, so `INSERT INTO t VALUES (1 + )` parsed
+// to an INSERT of an EMPTY row and `GROUP BY ROLLUP(a + )` to a childless ROLLUP.
+// The same fragments are (correctly) rejected in the ordinary expression path.
+TEST(ParserNegativeTest, SwallowedErrorInGroupingElementOrValuesRow) {
+    // VALUES rows (bare and under INSERT).
+    expect_parse_error("INSERT INTO t VALUES (1 + )");
+    expect_parse_error("VALUES (1 + )");
+    expect_parse_error("VALUES (a BETWEEN 1)");
+    // ROLLUP / CUBE / GROUPING SETS elements.
+    expect_parse_error("SELECT x FROM t GROUP BY ROLLUP(a + )");
+    expect_parse_error("SELECT x FROM t GROUP BY ROLLUP(a IS)");
+    expect_parse_error("SELECT x FROM t GROUP BY CUBE(a + )");
+    expect_parse_error("SELECT x FROM t GROUP BY GROUPING SETS ((a IS))");
+}
+
+// Guards: well-formed grouping elements and VALUES rows still parse.
+TEST(ParserNegativeTest, ValidGroupingElementsAndValuesRowsStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("INSERT INTO t VALUES (1 + 2)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("VALUES (1, 2)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT x FROM t GROUP BY ROLLUP(a, b)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT x FROM t GROUP BY CUBE(a, b)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT x FROM t GROUP BY GROUPING SETS ((a), (b))").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT x FROM t GROUP BY ()").has_value());
+}
+
 // An unclosed `::type[...]` array-type suffix (the array sibling of the `(...)`
 // type-parameter list above) must be a syntax error, not silently dropped. The
 // `::` shorthand had no closing delimiter to catch it, so `SELECT x::int[3 FROM
