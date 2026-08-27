@@ -477,12 +477,24 @@ ast::ASTNode* Parser::parse_primary_expression() {
                 u.push_back((c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c);
             }
             if (u == "CURRENT_DATE" || u == "CURRENT_TIME" || u == "CURRENT_TIMESTAMP") {
-                auto* fn = arena_.allocate<ast::ASTNode>();
-                new (fn) ast::ASTNode(ast::NodeType::FunctionCall);
-                fn->node_id = next_node_id_++;
-                fn->primary_text = copy_to_arena(current_token_->value);
-                advance();  // consume the niladic-function name
-                return fn;
+                // Only the PAREN-LESS spelling is niladic. CURRENT_TIME(p) and
+                // CURRENT_TIMESTAMP(p) take a precision argument, so if a '('
+                // follows, fall through to the function-call path below rather
+                // than emitting a no-arg node - otherwise the argument list AND
+                // every following clause (FROM/WHERE/...) are silently dropped
+                // while parse() still reports success.
+                const bool has_arg_list =
+                    peek_token_ &&
+                    peek_token_->type == tokenizer::TokenType::Delimiter &&
+                    peek_token_->value == "(";
+                if (!has_arg_list) {
+                    auto* fn = arena_.allocate<ast::ASTNode>();
+                    new (fn) ast::ASTNode(ast::NodeType::FunctionCall);
+                    fn->node_id = next_node_id_++;
+                    fn->primary_text = copy_to_arena(current_token_->value);
+                    advance();  // consume the niladic-function name
+                    return fn;
+                }
             }
         }
 
