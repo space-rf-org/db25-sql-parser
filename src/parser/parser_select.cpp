@@ -2161,7 +2161,17 @@ ast::ASTNode* Parser::parse_function_call() {
                 // Parse as expression
                 arg = parse_expression(0);
             }
-            
+
+            // A failed argument expression (parse_expression returned null, e.g.
+            // a malformed cast `x::int[9`) must ABORT the call, not be silently
+            // skipped: dropping it here let the loop resync on the next comma and
+            // swallow the error, so `f(x::int[9 , y)` parsed as `f(y)` and the
+            // malformed input was accepted. Propagate the failure (matching the
+            // other error returns in this function, which abort the parse).
+            if (!arg) {
+                return nullptr;
+            }
+
             if (arg) {
                 arg->parent = func_call;
                 if (!func_call->first_child) {

@@ -1489,12 +1489,16 @@ ast::ASTNode* Parser::parse_cast_expression() {
                 current_token_->type == tokenizer::TokenType::Number) {
                 advance();  // optional array size, ignored (as in DDL / ::cast)
             }
-            if (current_token_ && current_token_->value == "]") {
-                advance();  // consume ]
-                ++array_dims;
-            } else {
-                break;  // malformed: leave it for the error path below
+            // The `[` must be closed. Breaking on a missing `]` and leaving it to
+            // the downstream `)` check accepts `CAST(x AS int[3)` (the stray `[3`
+            // is silently dropped and the `)` closes the CAST). Require the `]`
+            // here, matching the `::type[...]` shorthand.
+            if (!current_token_ || current_token_->value != "]") {
+                error("expected ']' to close the cast array-type suffix");
+                return nullptr;
             }
+            advance();  // consume ]
+            ++array_dims;
         }
         if (array_dims > 0) {
             type_node->flags = static_cast<ast::NodeFlags>(
@@ -1683,12 +1687,21 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand,
                 current_token_->type == tokenizer::TokenType::Number) {
                 advance();  // optional array size, ignored (as in DDL)
             }
-            if (current_token_ && current_token_->value == "]") {
-                advance();  // consume ]
-                ++array_dims;
-            } else {
-                break;  // malformed: leave it for the caller / error path
+            // The `[` must be closed. An unclosed `::type[...` (e.g.
+            // `x::int[3 FROM t`) previously consumed the `[` and the optional
+            // size, then broke out and continued parsing as if the array suffix
+            // were absent - silently deleting the `[...` tokens and accepting a
+            // malformed query. This is the array sibling of the `(...)` type-
+            // parameter list hardened just above; the full CAST(... AS type[...])
+            // form already rejects here because its required closing `)` fails
+            // downstream, but the `::` shorthand has no such delimiter to catch
+            // it. Require the `]`.
+            if (!current_token_ || current_token_->value != "]") {
+                error("expected ']' to close the cast array-type suffix");
+                return nullptr;
             }
+            advance();  // consume ]
+            ++array_dims;
         }
         if (array_dims > 0) {
             type_node->flags = static_cast<ast::NodeFlags>(
