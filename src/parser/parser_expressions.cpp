@@ -387,6 +387,29 @@ ast::ASTNode* Parser::parse_primary_expression() {
         }
     }
 
+    // A clause-introducing keyword (FROM / WHERE / GROUP / HAVING / ORDER /
+    // LIMIT / OFFSET) terminates an expression - it is NEVER a value operand.
+    // get_precedence() already stops the operator loop on these in operator
+    // position, but in OPERAND position (the RHS of `a + FROM t`, or a bare
+    // `SELECT WHERE ...`) the identifier path below would swallow the keyword as
+    // a ColumnRef, silently deleting the real clause and accepting a
+    // structurally wrong statement. Reject here so the operand parse returns
+    // null and the caller reports a syntax error.
+    if (current_token_->type == tokenizer::TokenType::Keyword) {
+        switch (current_token_->keyword_id) {
+            case db25::Keyword::FROM:
+            case db25::Keyword::WHERE:
+            case db25::Keyword::GROUP:
+            case db25::Keyword::HAVING:
+            case db25::Keyword::ORDER:
+            case db25::Keyword::LIMIT:
+            case db25::Keyword::OFFSET:
+                return nullptr;
+            default:
+                break;
+        }
+    }
+
     // Handle identifiers (could be column, function, or simple identifier)
     // Also handle keywords that can be used as identifiers (e.g., date, time, level)
     if (current_token_->type == tokenizer::TokenType::Identifier ||
@@ -738,6 +761,22 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
     // shared budget the postfix folds above already charged to, so a spine of
     // postfixes topped by operators is bounded by their combined depth.
     while (true) {
+        // The PostgreSQL JSON access operators `->` / `->>` are tokenized as `-`
+        // followed by `>` / `>>` (the tokenizer emits no combined `->` token).
+        // DB25 does not support them. Detect the pair up front and reject with a
+        // clear message: otherwise `-` parses as binary minus and the following
+        // `>` fails as an operand, which - before the missing-RHS guard below -
+        // silently dropped the operator and every following clause (FROM/WHERE).
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Operator &&
+            current_token_->value == "-" && peek_token_ &&
+            peek_token_->type == tokenizer::TokenType::Operator &&
+            (peek_token_->value == ">" || peek_token_->value == ">>")) {
+            error("the JSON access operator '->" +
+                  std::string(peek_token_->value == ">>" ? ">" : "") +
+                  "' is not supported");
+            return nullptr;
+        }
+
         int precedence = get_precedence();
 
         // Check for invalid operators in strict mode
@@ -1158,11 +1197,19 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
         
         // Standard binary operator
         ast::ASTNode* right = parse_expression(precedence + 1);
-        
+
         if (!right) {
-            // If we can't parse right side, it might be an error
-            // For now, just return what we have
-            return left;
+            // The operator was already consumed, so a missing/invalid right
+            // operand is a syntax error: `a + FROM t` (a clause keyword in
+            // operand position), `a + )`, a trailing `a +`, or an unsupported
+            // operator token like the `->` JSON accessor (tokenized `-` then
+            // `>`, whose `>` is no operand). Returning `left` here SILENTLY
+            // dropped the operator and every following clause (FROM/WHERE/...),
+            // accepting a structurally wrong AST. Reject instead - matching the
+            // value-subscript / WITHIN GROUP / DISTINCT-FROM rejections.
+            error("expected an expression after binary operator '" +
+                  std::string(op_str_view) + "'");
+            return nullptr;
         }
         
         // Create binary expression node

@@ -167,20 +167,22 @@ TEST_F(AdvancedTypesTest, RowComparison) {
 // JSON Operator Tests
 // ============================================================================
 
-TEST_F(AdvancedTypesTest, JsonArrowOperator) {
+// The PostgreSQL JSON access operators `->` / `->>` are NOT supported. They must
+// be rejected with a clear error, NOT silently accepted by dropping the operator
+// and the trailing FROM clause (the tokenizer emits `-` then `>`, so `-` would
+// otherwise parse as binary minus and desync). Previously these queries appeared
+// to "parse" only because trailing-input tolerance swallowed `->'key' FROM ...`,
+// leaving a truncated `SELECT data` with no FROM clause.
+TEST_F(AdvancedTypesTest, JsonArrowOperatorRejected) {
     auto result = parser.parse("SELECT data->'key' FROM json_table");
-    ASSERT_TRUE(result.has_value()) << "Should parse -> operator";
-    
-    auto* ast = result.value();
-    auto* binary = find_node_type(ast, NodeType::BinaryExpr);
-    if (binary) {
-        EXPECT_EQ(binary->primary_text, "->") << "Should have -> operator";
-    }
+    EXPECT_FALSE(result.has_value())
+        << "`->` is unsupported and must be rejected, not silently truncated";
 }
 
-TEST_F(AdvancedTypesTest, JsonDoubleArrowOperator) {
+TEST_F(AdvancedTypesTest, JsonDoubleArrowOperatorRejected) {
     auto result = parser.parse("SELECT data->>'key' FROM json_table");
-    ASSERT_TRUE(result.has_value()) << "Should parse ->> operator";
+    EXPECT_FALSE(result.has_value())
+        << "`->>` is unsupported and must be rejected, not silently truncated";
 }
 
 TEST_F(AdvancedTypesTest, JsonPathOperator) {
@@ -441,8 +443,8 @@ TEST_F(AdvancedTypesTest, TypeSupportSummary) {
         {"INTERVAL literal", "SELECT INTERVAL '1 day'", true, "Expression"},
         {"ARRAY constructor", "SELECT ARRAY[1,2,3]", true, "Expression"},
         {"ROW constructor", "SELECT ROW(1,2,3)", true, "Expression"},
-        {"JSON operator ->", "SELECT data->'key' FROM t", true, "Expression"},
-        {"JSON operator ->>", "SELECT data->>'key' FROM t", true, "Expression"},
+        {"JSON operator ->", "SELECT data->'key' FROM t", false, "Expression"},
+        {"JSON operator ->>", "SELECT data->>'key' FROM t", false, "Expression"},
     };
     
     int ddl_passed = 0, ddl_total = 0;

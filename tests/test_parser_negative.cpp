@@ -61,6 +61,39 @@ TEST(ParserNegativeTest, WhereStartsWithAnd) {
     expect_parse_error("WHERE AND x");
 }
 
+// A binary operator whose right operand is a clause-introducing keyword must be
+// a syntax error - NOT silently accepted with the keyword absorbed as a column
+// and the real clause deleted. `SELECT a + FROM t` used to yield BinaryExpr('+',
+// a, ColumnRef 'FROM') with no FROM clause.
+TEST(ParserNegativeTest, BinaryOperatorWithClauseKeywordOperand) {
+    expect_parse_error("SELECT a + FROM t");
+    expect_parse_error("SELECT a * WHERE x");
+    expect_parse_error("SELECT a || ORDER BY b");
+    expect_parse_error("SELECT a + GROUP BY b");
+    expect_parse_error("SELECT a - LIMIT 1");
+    // A trailing binary operator with no operand at all is likewise rejected.
+    expect_parse_error("SELECT a + FROM t WHERE b");
+}
+
+// The unsupported PostgreSQL JSON access operators `->` / `->>` are rejected,
+// not silently truncated (which dropped the trailing FROM/WHERE).
+TEST(ParserNegativeTest, JsonArrowOperatorsRejected) {
+    expect_parse_error("SELECT data->'key' FROM t");
+    expect_parse_error("SELECT data->>'key' FROM t WHERE id = 5");
+}
+
+// Guards: legal binary minus / arithmetic and a legal negative literal still
+// parse - the reserved-keyword-operand and missing-RHS guards must not reject
+// well-formed expressions.
+TEST(ParserNegativeTest, LegalArithmeticStillParses) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT a - b FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a - 1, a + b * c FROM t WHERE a > b").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT -a, a - -1 FROM t").has_value());
+}
+
 // Unbalanced parentheses in a predicate.
 TEST(ParserNegativeTest, UnbalancedParensInPredicate) {
     expect_parse_error("SELECT * FROM t WHERE (a AND b");
