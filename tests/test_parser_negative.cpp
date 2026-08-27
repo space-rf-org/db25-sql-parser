@@ -284,6 +284,35 @@ TEST(ParserNegativeTest, SilentlyTruncatedFromSetopUpdateRejected) {
     expect_parse_error("UPDATE t SET a =");
 }
 
+// A WHEN branch of a CASE expression whose condition parses but is not followed
+// by THEN silently dropped the parsed condition (the THEN block was the ONLY
+// place condition/result got attached) and emitted a childless WHEN node while
+// parse() returned success -- another break-on-null / missing-required-keyword
+// truncation not caught by the has_error_ backstop. THEN is mandatory.
+TEST(ParserNegativeTest, CaseWhenMissingThenRejected) {
+    // Searched CASE, single THEN-less branch.
+    expect_parse_error("SELECT CASE WHEN x END FROM t");
+    // Simple CASE, THEN-less branch drops the WHEN value.
+    expect_parse_error("SELECT CASE x WHEN 1 END FROM t");
+    // Mid-list THEN-less branch after a well-formed one.
+    expect_parse_error("SELECT CASE WHEN a THEN 1 WHEN b END FROM t");
+    // THEN-less branch followed by ELSE.
+    expect_parse_error("SELECT CASE WHEN x ELSE 0 END FROM t");
+}
+
+// Guard: well-formed CASE expressions (searched and simple, with/without ELSE)
+// still parse.
+TEST(ParserNegativeTest, ValidCaseExpressionsStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT CASE WHEN x THEN 1 END FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT CASE WHEN x THEN 1 ELSE 0 END FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT CASE x WHEN 1 THEN 'a' WHEN 2 THEN 'b' END FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT CASE x WHEN 1 THEN 'a' ELSE 'z' END FROM t").has_value());
+}
+
 // Guards: well-formed comma FROM lists, set operations, and UPDATE assignments
 // still parse.
 TEST(ParserNegativeTest, ValidFromSetopUpdateStillParse) {
