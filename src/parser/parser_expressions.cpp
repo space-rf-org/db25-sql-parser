@@ -157,8 +157,9 @@ ast::ASTNode* Parser::parse_primary_expression() {
             num->primary_text = copy_to_arena(digits);  // unsigned for now
             advance();  // consume the number
 
-            ast::ASTNode* operand = parse_collate_postfix(num);
-            if (operand) operand = parse_cast_postfix(operand);
+            std::size_t neg_fold = 0;
+            ast::ASTNode* operand = parse_collate_postfix(num, neg_fold);
+            if (operand) operand = parse_cast_postfix(operand, neg_fold);
             if (operand == num) {
                 // No postfix bound: fold the sign into the literal (fast path).
                 num->primary_text = copy_to_arena("-" + digits);
@@ -195,11 +196,12 @@ ast::ASTNode* Parser::parse_primary_expression() {
         // instead of `-(a::int)` (and `-'5'::int` as unary minus over a string
         // literal - a spurious type error on a legal query).
         auto* operand = parse_primary_expression();
+        std::size_t unary_fold = 0;
         if (operand) {
-            operand = parse_collate_postfix(operand);
+            operand = parse_collate_postfix(operand, unary_fold);
         }
         if (operand) {
-            operand = parse_cast_postfix(operand);
+            operand = parse_cast_postfix(operand, unary_fold);
         }
         if (operand) {
             operand->parent = unary_node;
@@ -673,13 +675,19 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
     // unconsumed and silently discarded (FROM/WHERE and all). Looping makes
     // `a::int COLLATE "C"` -> `(a::int) COLLATE "C"`, matching the CAST(...)
     // COLLATE and plain-COLLATE shapes, and preserves the trailing clauses.
+    // One shared iterative-fold budget for this expression's entire left-deep
+    // spine: the COLLATE / ::cast postfixes below AND the binary-operator fold
+    // further down all charge against it, so no combination (a pure chain, an
+    // alternating COLLATE/::cast chain, or postfixes topped by operators) can
+    // build an AST deeper than max_depth by resetting a per-loop counter.
+    std::size_t fold_count = 0;
     while (true) {
         ast::ASTNode* before = left;
-        left = parse_collate_postfix(left);
+        left = parse_collate_postfix(left, fold_count);
         if (!left) {
             return nullptr;
         }
-        left = parse_cast_postfix(left);
+        left = parse_cast_postfix(left, fold_count);
         if (!left) {
             return nullptr;
         }
@@ -714,8 +722,9 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
     // (analyze / bind / optimize) on otherwise-legal input. Bound the cumulative
     // depth (this call's recursion depth + operators folded here) at max_depth and
     // surface the standard depth-exceeded error, exactly as fold_set_operations
-    // does for a flat set-op chain (commit 196d58d).
-    std::size_t fold_count = 0;
+    // does for a flat set-op chain (commit 196d58d). fold_count is the SAME
+    // shared budget the postfix folds above already charged to, so a spine of
+    // postfixes topped by operators is bounded by their combined depth.
     while (true) {
         int precedence = get_precedence();
 
@@ -1416,24 +1425,26 @@ ast::ASTNode* Parser::parse_cast_expression() {
 
 // ========== COLLATE postfix ==========
 
-ast::ASTNode* Parser::parse_collate_postfix(ast::ASTNode* operand) {
+ast::ASTNode* Parser::parse_collate_postfix(ast::ASTNode* operand,
+                                            std::size_t& fold_depth) {
     // `<value> COLLATE <collation>` annotates a value with a collation. COLLATE
     // binds tighter than any binary operator, so it is applied as a postfix to
     // the primary immediately after it is parsed. The collation name is stored
     // on the CollateClause's schema_name; the annotated value is its one child.
     // Like the binary-operator and ::cast folds, this COLLATE chain is iterative
-    // and so escapes the recursion DepthGuard; cap the cumulative depth so a
-    // pathological `a COLLATE "C" COLLATE "C" ...` chain is rejected rather than
-    // building an unbounded tree that overflows downstream recursive walkers.
-    std::size_t collate_count = 0;
+    // and so escapes the recursion DepthGuard; charge each fold to the SHARED
+    // fold_depth budget so a pathological `a COLLATE "C" ...` chain - or an
+    // alternating `a COLLATE "C"::int COLLATE "C"::int ...` chain spread across
+    // this helper and parse_cast_postfix - is rejected rather than building an
+    // unbounded tree that overflows downstream recursive walkers.
     while (operand != nullptr && current_token_ &&
            current_token_->type == tokenizer::TokenType::Keyword &&
            current_token_->keyword_id == db25::Keyword::COLLATE) {
-        if (current_depth_ + collate_count >= config_.max_depth) {
+        if (current_depth_ + fold_depth >= config_.max_depth) {
             depth_exceeded_ = true;
             break;  // chain too deep: parse() surfaces the depth-exceeded error
         }
-        ++collate_count;
+        ++fold_depth;
         advance();  // consume COLLATE
         auto* node = arena_.allocate<ast::ASTNode>();
         new (node) ast::ASTNode(ast::NodeType::CollateClause);
@@ -1457,7 +1468,8 @@ ast::ASTNode* Parser::parse_collate_postfix(ast::ASTNode* operand) {
     return operand;
 }
 
-ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand) {
+ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand,
+                                         std::size_t& fold_depth) {
     // `<value>::<type>` is the PostgreSQL shorthand for CAST(<value> AS <type>).
     // The tokenizer emits `::` as a single two-char token (typed Delimiter, since
     // `:` is a delimiter), so match on the value. This builds the SAME CastExpr
@@ -1466,16 +1478,16 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand) {
     // stored on the type node's schema_name - so the analyzer and binder need no
     // change. Chained casts (`a::int::text`) fold left via the loop.
     // Like the binary-operator fold, this cast chain is iterative and so escapes
-    // the recursion DepthGuard; cap the cumulative depth so a pathological
-    // `x::int::int...` chain is rejected rather than building an unbounded tree
-    // that overflows downstream recursive walkers.
-    std::size_t cast_count = 0;
+    // the recursion DepthGuard; charge each fold to the SHARED fold_depth budget
+    // (shared with parse_collate_postfix and the operator loop) so a pathological
+    // `x::int::int...` chain - or an alternating collate/cast chain - is rejected
+    // rather than building an unbounded tree that overflows downstream walkers.
     while (operand != nullptr && current_token_ && current_token_->value == "::") {
-        if (current_depth_ + cast_count >= config_.max_depth) {
+        if (current_depth_ + fold_depth >= config_.max_depth) {
             depth_exceeded_ = true;
             break;  // chain too deep: parse() surfaces the depth-exceeded error
         }
-        ++cast_count;
+        ++fold_depth;
         advance();  // consume ::
         if (!current_token_ ||
             (current_token_->type != tokenizer::TokenType::Identifier &&

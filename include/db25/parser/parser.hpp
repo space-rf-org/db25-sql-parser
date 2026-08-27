@@ -318,10 +318,17 @@ protected:
     [[nodiscard]] ast::ASTNode* parse_case_expression();
     [[nodiscard]] ast::ASTNode* parse_cast_expression();
     // Wrap `operand` in a CollateClause for each trailing COLLATE <name> postfix.
-    // Returns `operand` unchanged when no COLLATE follows.
-    [[nodiscard]] ast::ASTNode* parse_collate_postfix(ast::ASTNode* operand);
+    // Returns `operand` unchanged when no COLLATE follows. `fold_depth` is the
+    // shared iterative-fold budget for the enclosing left-deep spine (postfix +
+    // operator folds): each fold checks `current_depth_ + fold_depth` against
+    // max_depth and increments it, so alternating COLLATE/::cast postfixes cannot
+    // bypass the cap by resetting a per-helper counter.
+    [[nodiscard]] ast::ASTNode* parse_collate_postfix(ast::ASTNode* operand,
+                                                      std::size_t& fold_depth);
     // `<value>::<type>` shorthand for CAST(<value> AS <type>); postfix, tightest.
-    [[nodiscard]] ast::ASTNode* parse_cast_postfix(ast::ASTNode* operand);
+    // `fold_depth` is the same shared iterative-fold budget (see above).
+    [[nodiscard]] ast::ASTNode* parse_cast_postfix(ast::ASTNode* operand,
+                                                   std::size_t& fold_depth);
     [[nodiscard]] ast::ASTNode* parse_extract_expression();
     
     // ========== Pratt Parser for Expressions ==========
