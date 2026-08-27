@@ -369,3 +369,41 @@ TEST_F(GroupByTest, EmptyGroupingSet) {
     EXPECT_EQ(gb3->child_count, 1);
     ASSERT_NE(gb3->first_child, nullptr);
 }
+
+// An empty grouping set `()` is the identity of the grouping-set cross product,
+// so `GROUP BY (), dept` == `GROUP BY dept`: the `()` contributes no column but
+// must NOT terminate the list. Returning early on the first `()` silently
+// dropped the remaining keys AND any trailing HAVING/ORDER BY/LIMIT (the whole
+// query collapsed to a grand total). `()` is skippable at any position.
+TEST_F(GroupByTest, EmptyGroupingSetMixedWithColumns) {
+    // Leading `()`: the real key survives, and so does a trailing clause.
+    auto* a = parse("SELECT COUNT(*) FROM employees GROUP BY (), dept");
+    ASSERT_NE(a, nullptr);
+    auto* gba = find_node_by_type(a, NodeType::GroupByClause);
+    ASSERT_NE(gba, nullptr);
+    EXPECT_EQ(gba->child_count, 1);  // dept, NOT a childless grand total
+    ASSERT_NE(gba->first_child, nullptr);
+    EXPECT_EQ(gba->first_child->primary_text, "dept");
+
+    // The remainder of the statement is not discarded: a trailing LIMIT / ORDER
+    // BY / HAVING after a leading `()` must still be parsed.
+    auto* al = parse("SELECT COUNT(*) FROM employees GROUP BY (), dept LIMIT 5");
+    ASSERT_NE(al, nullptr);
+    EXPECT_NE(find_node_by_type(al, NodeType::LimitClause), nullptr);
+    auto* ah = parse("SELECT COUNT(*) FROM employees GROUP BY (), dept HAVING COUNT(*) > 1");
+    ASSERT_NE(ah, nullptr);
+    EXPECT_NE(find_node_by_type(ah, NodeType::HavingClause), nullptr);
+
+    // Trailing and middle `()` are skipped too.
+    auto* at = parse("SELECT COUNT(*) FROM employees GROUP BY dept, ()");
+    ASSERT_NE(at, nullptr);
+    EXPECT_EQ(find_node_by_type(at, NodeType::GroupByClause)->child_count, 1);
+    auto* am = parse("SELECT COUNT(*) FROM employees GROUP BY dept, (), region");
+    ASSERT_NE(am, nullptr);
+    EXPECT_EQ(find_node_by_type(am, NodeType::GroupByClause)->child_count, 2);
+
+    // A list of only empty sets is still the grand total (childless clause).
+    auto* ae = parse("SELECT COUNT(*) FROM employees GROUP BY (), ()");
+    ASSERT_NE(ae, nullptr);
+    EXPECT_EQ(find_node_by_type(ae, NodeType::GroupByClause)->child_count, 0);
+}
