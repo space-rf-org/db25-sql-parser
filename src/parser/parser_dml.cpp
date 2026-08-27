@@ -463,12 +463,20 @@ ast::ASTNode* Parser::parse_update_stmt() {
                 }
             }
         }
-        
+
+        // RETURNING requires at least one output; a dangling RETURNING (or one
+        // whose first item fails to parse) previously yielded an empty clause
+        // and a clean parse.
+        if (returning_clause->child_count == 0) {
+            error("expected an output expression or '*' after RETURNING");
+            return nullptr;
+        }
+
         returning_clause->parent = update_node;
         last_child->next_sibling = returning_clause;
         update_node->child_count++;
     }
-    
+
     return update_node;
 }
 
@@ -597,12 +605,19 @@ ast::ASTNode* Parser::parse_delete_stmt() {
                 }
             }
         }
-        
+
+        // RETURNING requires at least one output; reject a dangling RETURNING
+        // (empty clause) rather than accept a truncated statement.
+        if (returning_clause->child_count == 0) {
+            error("expected an output expression or '*' after RETURNING");
+            return nullptr;
+        }
+
         returning_clause->parent = delete_node;
         last_child->next_sibling = returning_clause;
         delete_node->child_count++;
     }
-    
+
     return delete_node;
 }
 
@@ -653,7 +668,15 @@ ast::ASTNode* Parser::parse_returning_clause() {
             break;
         }
     }
-    
+
+    // RETURNING requires at least one output expression or '*'; a dangling
+    // RETURNING keyword previously yielded an empty ReturningClause and a clean
+    // parse (the break-on-null empty-list family).
+    if (returning_clause->child_count == 0) {
+        error("expected an output expression or '*' after RETURNING");
+        return nullptr;
+    }
+
     return returning_clause;
 }
 
@@ -712,10 +735,16 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
                     advance();
                 }
             } else {
-                advance();  // Skip unexpected token
+                // A non-identifier in the conflict target (an index expression
+                // like `(a + b)` or `(lower(a))`) was silently SKIPPED, turning
+                // one expression target into a fabricated list of separate
+                // columns with the operator/parens dropped -- a wrong AST that
+                // changes the statement's meaning. Reject the unsupported form.
+                error("expected a column name in the ON CONFLICT conflict target");
+                return nullptr;
             }
         }
-        
+
         if (current_token_ && current_token_->value == ")") {
             advance();
             parenthesis_depth_--;
@@ -758,23 +787,34 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
                 
                 while (current_token_) {
                     if (current_token_->type != tokenizer::TokenType::Identifier) break;
-                    
+
                     auto* assignment = arena_.allocate<ast::ASTNode>();
                     new (assignment) ast::ASTNode(ast::NodeType::BinaryExpr);  // Using BinaryExpr for assignments
                     assignment->node_id = next_node_id_++;
                     assignment->primary_text = copy_to_arena(current_token_->value);
                     advance();
-                    
-                    if (current_token_ && current_token_->value == "=") {
-                        advance();
-                        auto* expr = parse_expression(0);
-                        if (expr) {
-                            expr->parent = assignment;
-                            assignment->first_child = expr;
-                            assignment->child_count = 1;
-                        }
+
+                    // A DO UPDATE SET assignment requires `column = value`. The
+                    // '=' and its value were previously OPTIONAL, so `... DO
+                    // UPDATE SET b` (no '=') and `... SET b WHERE ...` built a
+                    // value-less assignment node and returned a clean parse.
+                    // Require both, matching the standalone UPDATE SET path.
+                    if (!current_token_ || current_token_->value != "=") {
+                        error("expected '=' after the column name in ON CONFLICT "
+                              "DO UPDATE SET");
+                        return nullptr;
                     }
-                    
+                    advance();  // consume '='
+                    auto* expr = parse_expression(0);
+                    if (!expr) {
+                        error("expected a value expression after '=' in ON CONFLICT "
+                              "DO UPDATE SET");
+                        return nullptr;
+                    }
+                    expr->parent = assignment;
+                    assignment->first_child = expr;
+                    assignment->child_count = 1;
+
                     assignment->parent = set_clause;
                     if (!first_assignment) {
                         first_assignment = assignment;
@@ -784,12 +824,21 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
                     }
                     last_assignment = assignment;
                     set_clause->child_count++;
-                    
+
                     if (current_token_ && current_token_->value == ",") {
                         advance();
                     } else {
                         break;
                     }
+                }
+
+                // DO UPDATE SET must carry at least one assignment; a bare `DO
+                // UPDATE SET` (nothing, or a non-identifier like WHERE next)
+                // previously yielded an empty SetClause and a clean parse.
+                if (set_clause->child_count == 0) {
+                    error("expected at least one 'column = value' assignment in "
+                          "ON CONFLICT DO UPDATE SET");
+                    return nullptr;
                 }
             }
         }

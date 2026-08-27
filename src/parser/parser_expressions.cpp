@@ -90,8 +90,11 @@ ast::ASTNode* Parser::parse_primary_expression() {
                 exists_node->semantic_flags |= 0x40; // Set NOT flag
                 
                 advance(); // consume EXISTS
-                
-                // Parse subquery
+
+                // The parser is deliberately lenient about the EXISTS operand
+                // shape (a parenthesized scalar like `((SELECT 1) + 2)` still
+                // parses); requiring a subquery operand is a SEMANTIC rule the
+                // analyzer enforces.
                 auto* operand = parse_primary_expression();
                 if (operand) {
                     operand->parent = exists_node;
@@ -105,14 +108,19 @@ ast::ASTNode* Parser::parse_primary_expression() {
                 new (not_node) ast::ASTNode(ast::NodeType::UnaryExpr);
                 not_node->node_id = next_node_id_++;
                 not_node->primary_text = "NOT";
-                
-                // Parse operand with higher precedence than NOT (3)
+
+                // Parse operand with higher precedence than NOT (3). A missing
+                // operand (`NOT > 5`, a binary operator in operand position)
+                // previously built a CHILDLESS UnaryExpr that analyzed clean but
+                // could not bind; require the operand.
                 auto* operand = parse_expression(3);
-                if (operand) {
-                    operand->parent = not_node;
-                    not_node->first_child = operand;
-                    not_node->child_count = 1;
+                if (operand == nullptr) {
+                    error("expected an expression after unary operator 'NOT'");
+                    return nullptr;
                 }
+                operand->parent = not_node;
+                not_node->first_child = operand;
+                not_node->child_count = 1;
                 return not_node;
             }
         } else if (current_token_->keyword_id == db25::Keyword::EXISTS) {
@@ -123,8 +131,10 @@ ast::ASTNode* Parser::parse_primary_expression() {
             exists_node->primary_text = "EXISTS";
             
             advance(); // consume EXISTS
-            
-            // Parse subquery
+
+            // Deliberately lenient about the operand shape (see NOT EXISTS
+            // above); the "EXISTS requires a subquery" rule is enforced
+            // semantically by the analyzer.
             auto* operand = parse_primary_expression();
             if (operand) {
                 operand->parent = exists_node;
@@ -227,10 +237,15 @@ ast::ASTNode* Parser::parse_primary_expression() {
         // instead of `-(a::int)` (and `-'5'::int` as unary minus over a string
         // literal - a spurious type error on a legal query).
         auto* operand = parse_primary_expression();
-        std::size_t unary_fold = 0;
-        if (operand) {
-            operand = parse_collate_postfix(operand, unary_fold);
+        // A unary +/- with no operand (`- > 5`, `+ FROM t`) previously built a
+        // CHILDLESS UnaryExpr that analyzed clean but could not bind; require it.
+        if (operand == nullptr) {
+            error(std::string("expected an expression after unary operator '") +
+                  std::string(op) + "'");
+            return nullptr;
         }
+        std::size_t unary_fold = 0;
+        operand = parse_collate_postfix(operand, unary_fold);
         if (operand) {
             operand = parse_cast_postfix(operand, unary_fold);
         }
