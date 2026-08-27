@@ -851,18 +851,31 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                 // trailing `AND c` to the outer loop, so
                 // `x BETWEEN a AND b AND c` stays `(x BETWEEN a AND b) AND c`.
                 constexpr int kBetweenBoundPrec = 5; // PREC_COMP + 1
+                // The BETWEEN keyword is already consumed, so a missing bound or
+                // AND is a syntax error: returning `left` here would SILENTLY drop
+                // the consumed `BETWEEN <low>` and reinterpret the rest of the
+                // statement (e.g. `x BETWEEN 1 GROUP BY y` -> a bare truthiness
+                // test on x with a phantom GROUP BY). Reject, matching the IN /
+                // clause-keyword-operand rejections.
                 auto* lower = parse_expression(kBetweenBoundPrec);
-                if (!lower) return left;
+                if (!lower) {
+                    error("expected the lower bound of a BETWEEN expression");
+                    return nullptr;
+                }
 
                 // Expect AND
                 if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
                     current_token_->keyword_id != db25::Keyword::AND) {
-                    return left; // Error: missing AND
+                    error("expected AND in a BETWEEN expression");
+                    return nullptr;
                 }
                 advance(); // consume AND
 
                 auto* upper = parse_expression(kBetweenBoundPrec);
-                if (!upper) return left;
+                if (!upper) {
+                    error("expected the upper bound of a BETWEEN expression");
+                    return nullptr;
+                }
                 
                 // Create BETWEEN node
                 auto* between_node = arena_.allocate<ast::ASTNode>();
@@ -1016,7 +1029,13 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                 // pattern.
                 constexpr int kComparisonOperandPrec = 5;  // PREC_COMP + 1
                 auto* pattern = parse_expression(kComparisonOperandPrec);
-                if (!pattern) return left;
+                if (!pattern) {
+                    // LIKE/ILIKE already consumed: a missing pattern is a syntax
+                    // error, not a reason to silently drop the operator and keep a
+                    // bare left operand (`a LIKE GROUP BY y`).
+                    error("expected a pattern after LIKE/ILIKE");
+                    return nullptr;
+                }
 
                 auto* like_node = arena_.allocate<ast::ASTNode>();
                 new (like_node) ast::ASTNode(ast::NodeType::LikeExpr);
@@ -1154,7 +1173,13 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                 // Expect NULL
                 if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
                     (current_token_->value != "NULL" && current_token_->value != "null")) {
-                    return left; // Error: expected NULL / TRUE / FALSE / UNKNOWN
+                    // IS (and any NOT) already consumed: an IS not followed by
+                    // NULL / TRUE / FALSE / UNKNOWN / DISTINCT FROM is a syntax
+                    // error, NOT a reason to silently drop IS and keep a bare left
+                    // operand (`x IS GROUP BY y`). Matches the DISTINCT-FROM path
+                    // above, which already rejects.
+                    error("expected NULL, TRUE, FALSE, UNKNOWN, or DISTINCT FROM after IS");
+                    return nullptr;
                 }
                 advance(); // consume NULL
 

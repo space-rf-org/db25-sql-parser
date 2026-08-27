@@ -115,24 +115,26 @@ TEST_F(ExprHardeningTest, BetweenSimpleBounds) {
 }
 
 TEST_F(ExprHardeningTest, BetweenBoundDoesNotAbsorbComparison) {
-    // `x BETWEEN a = c AND b`: a BETWEEN bound is a value expression that binds
-    // tighter than comparison, so the low bound must NOT fold in the `= c`
-    // comparison (the previous bug produced BetweenExpr -> [x, (a=c), b]).
-    // The parse must not crash. If any BetweenExpr is produced, its low bound
-    // must not be a comparison node.
-    auto* ast = parse("SELECT * FROM t WHERE x BETWEEN a = c AND b");
+    // A BETWEEN bound binds TIGHTER than comparison (bounds parsed at PREC_COMP+1),
+    // so a bound never folds in a comparison. `x BETWEEN a = c AND b` therefore has
+    // low bound `a`, and the `= c` before AND cannot belong to the bound - the
+    // BETWEEN cannot be formed. That is a syntax error, NOT a reason to silently
+    // drop `BETWEEN a` and reinterpret the rest (which produced a bare truthiness
+    // test on `x`). It must be REJECTED.
+    EXPECT_EQ(parse("SELECT * FROM t WHERE x BETWEEN a = c AND b"), nullptr);
+
+    // The tighter-than-comparison rule is what a VALID query relies on: the upper
+    // bound must not absorb a trailing `= z`, so `x BETWEEN 1 AND 10 = z` parses as
+    // `(x BETWEEN 1 AND 10) = z` - a top-level `=` over a BETWEEN, not a BETWEEN
+    // whose upper bound is `10 = z`.
+    auto* ast = parse("SELECT * FROM t WHERE x BETWEEN 1 AND 10 = z");
     ASSERT_NE(ast, nullptr);
-    auto* between = find(ast, NodeType::BetweenExpr);
-    if (between != nullptr) {
-        auto* value = between->first_child;
-        ASSERT_NE(value, nullptr);
-        auto* low = value->next_sibling;
-        ASSERT_NE(low, nullptr);
-        // The low bound must never be a `=` comparison absorbed into the bound.
-        const bool low_is_comparison =
-            (low->node_type == NodeType::BinaryExpr && low->primary_text == "=");
-        EXPECT_FALSE(low_is_comparison);
-    }
+    auto* pred = where_predicate(ast);
+    ASSERT_NE(pred, nullptr);
+    EXPECT_EQ(pred->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(pred->primary_text, "=");
+    ASSERT_NE(pred->first_child, nullptr);
+    EXPECT_EQ(pred->first_child->node_type, NodeType::BetweenExpr);
 }
 
 TEST_F(ExprHardeningTest, BetweenTrailingAndStillTerminates) {
