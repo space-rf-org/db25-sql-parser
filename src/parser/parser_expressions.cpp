@@ -1349,30 +1349,38 @@ ast::ASTNode* Parser::parse_case_expression() {
         
         // Parse condition
         auto* condition = parse_expression(0);
-        
-        // Expect THEN
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-            (current_token_->keyword_id == db25::Keyword::THEN)) {
-            advance(); // consume THEN
-            
-            // Parse result expression
-            auto* result = parse_expression(0);
-            
-            // Set up WHEN node with condition and result as children
+
+        // THEN is mandatory after a WHEN condition. Without this guard a
+        // THEN-less WHEN (`CASE WHEN x END`, `CASE x WHEN 1 END`) skipped the
+        // block below -- the ONLY place condition/result are attached -- so the
+        // already-parsed condition was silently orphaned, the WHEN branch ended
+        // up childless, and no error() was recorded (the parse()/has_error_
+        // backstop never fired). Reject rather than emit a truncated CaseExpr.
+        if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
+            current_token_->keyword_id != db25::Keyword::THEN) {
+            error("expected THEN after the WHEN condition in a CASE expression");
+            pop_context();
+            return nullptr;
+        }
+        advance(); // consume THEN
+
+        // Parse result expression
+        auto* result = parse_expression(0);
+
+        // Set up WHEN node with condition and result as children
+        if (condition) {
+            condition->parent = when_node;
+            when_node->first_child = condition;
+            when_node->child_count++;
+        }
+        if (result) {
+            result->parent = when_node;
             if (condition) {
-                condition->parent = when_node;
-                when_node->first_child = condition;
-                when_node->child_count++;
+                condition->next_sibling = result;
+            } else {
+                when_node->first_child = result;
             }
-            if (result) {
-                result->parent = when_node;
-                if (condition) {
-                    condition->next_sibling = result;
-                } else {
-                    when_node->first_child = result;
-                }
-                when_node->child_count++;
-            }
+            when_node->child_count++;
         }
         
         // Add WHEN node to CASE
