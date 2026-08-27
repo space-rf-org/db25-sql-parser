@@ -395,6 +395,30 @@ TEST_F(AdvancedTypesTest, TemporalLiteralsAndNiladicFunctions) {
     EXPECT_TRUE(parser.parse("SELECT CAST(x AS DATE) FROM t").has_value());
 }
 
+// The PRECISION forms CURRENT_TIME(p) / CURRENT_TIMESTAMP(p) take a
+// parenthesized argument and are ordinary function calls - the niladic
+// promotion must NOT swallow them, which would drop the argument list AND every
+// following clause (FROM/WHERE/...) while parse() still reported success.
+TEST_F(AdvancedTypesTest, NiladicDatetimePrecisionFormIsAFunctionCall) {
+    for (const char* sql : {"SELECT CURRENT_TIMESTAMP(6) FROM t",
+                            "SELECT current_timestamp(6) FROM t",
+                            "SELECT CURRENT_TIME(2) FROM t"}) {
+        auto r = parser.parse(sql);
+        ASSERT_TRUE(r.has_value()) << sql;
+        // The select item is a FunctionCall carrying the precision argument.
+        auto* list = find_node_type(r.value(), NodeType::SelectList);
+        ASSERT_NE(list, nullptr) << sql;
+        ASSERT_NE(list->first_child, nullptr) << sql;
+        EXPECT_EQ(list->first_child->node_type, NodeType::FunctionCall) << sql;
+        EXPECT_NE(list->first_child->first_child, nullptr)
+            << sql << ": the precision argument must be a child, not dropped";
+        // The FROM clause after the argument list must survive.
+        EXPECT_NE(find_node_type(r.value(), NodeType::FromClause), nullptr)
+            << sql << ": the FROM clause after CURRENT_TIMESTAMP(p) was dropped";
+        parser.reset();
+    }
+}
+
 // ============================================================================
 // Summary Test
 // ============================================================================
