@@ -688,6 +688,22 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
         }
     }
 
+    // A value array-subscript `expr[...]` (e.g. `a[1]`, `t.a[1]`) is not part of
+    // this grammar - only the ARRAY[...] constructor and the `::type[]` array-type
+    // cast suffix use brackets, and both are fully consumed above (in
+    // parse_primary_expression / parse_cast_postfix). A '[' still sitting here
+    // therefore follows a COMPLETE value expression and is a subscript. It has no
+    // rule, so it would desync the operator loop and let statement-level leftover
+    // tolerance silently DROP the '[' and everything after it (further select
+    // items, FROM, the rest of a WHERE predicate). Reject it explicitly instead,
+    // matching the norm for other unsupported constructs (WITHIN GROUP, a COLLATE
+    // trailing a cast, OVER <named-window>).
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
+        current_token_->value == "[") {
+        error("array subscript on a value expression is not supported");
+        return nullptr;
+    }
+
     // Loop to handle operators with precedence
     while (true) {
         int precedence = get_precedence();

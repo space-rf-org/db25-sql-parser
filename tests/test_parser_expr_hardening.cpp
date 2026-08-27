@@ -519,6 +519,29 @@ TEST_F(ExprHardeningTest, IncompleteOrderedAggregateIsRejected) {
     EXPECT_TRUE(parser->parse("SELECT array_agg(x ORDER BY y) FROM t").has_value());
 }
 
+// ---- Value array-subscript -------------------------------------------------
+
+TEST_F(ExprHardeningTest, ValueSubscriptIsRejectedNotTruncated) {
+    // `a[1]` is a value array-subscript, which this grammar does not support.
+    // It must be REJECTED, not silently dropped along with the rest of the
+    // statement (previously `SELECT a[1], b FROM t` parsed as just `a`, losing
+    // `b` and the whole FROM; `WHERE a[1] = 5` became `WHERE a`).
+    EXPECT_FALSE(parser->parse("SELECT a[1], b FROM t").has_value())
+        << "a value subscript must be rejected";
+    EXPECT_FALSE(parser->parse("SELECT x FROM t WHERE a[1] = 5").has_value())
+        << "a value subscript in a predicate must be rejected";
+    EXPECT_FALSE(parser->parse("SELECT t.a[1] FROM t").has_value())
+        << "a qualified value subscript must be rejected";
+
+    // Guard against over-rejection: the ARRAY[...] constructor, the `::type[]`
+    // array-type cast suffix, and a DDL array type all legitimately use brackets
+    // and must still parse.
+    EXPECT_TRUE(parser->parse("SELECT ARRAY[1, 2, 3] FROM t").has_value());
+    EXPECT_TRUE(parser->parse("SELECT x::int[] FROM t").has_value());
+    EXPECT_TRUE(parser->parse("SELECT x::int[][] FROM t").has_value());
+    EXPECT_TRUE(parser->parse("CREATE TABLE t (a INTEGER[])").has_value());
+}
+
 // ---- Row constructors ------------------------------------------------------
 
 TEST_F(ExprHardeningTest, BareTupleBuildsRowConstructor) {
