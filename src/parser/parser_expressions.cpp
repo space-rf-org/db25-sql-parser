@@ -1026,7 +1026,16 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                             if (parenthesis_depth_ > 0) parenthesis_depth_--;
                             advance(); // consume )
                         }
-                        
+
+                        // The value list must be non-empty: `a IN ()` / `a IN (,)`
+                        // previously built an InExpr with only the left operand and
+                        // zero candidates, returning a clean parse. Standard SQL
+                        // requires at least one value (child_count 1 == left only).
+                        if (in_node->child_count <= 1) {
+                            error("expected at least one value in the IN list");
+                            return nullptr;
+                        }
+
                         left = in_node;
                         continue;
                     }
@@ -1117,12 +1126,18 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
                     advance();  // consume ESCAPE
                     // Same reasoning as the pattern: parse the ESCAPE operand at
                     // PREC_COMP + 1 so a trailing comparison is left for the outer
-                    // loop rather than folded into the escape expression.
-                    if (auto* escape = parse_expression(5 /* PREC_COMP + 1 */)) {
-                        escape->parent = like_node;
-                        pattern->next_sibling = escape;
-                        like_node->child_count = 3;
+                    // loop rather than folded into the escape expression. The
+                    // operand is mandatory: `a LIKE 'x' ESCAPE` (no character)
+                    // previously swallowed the ESCAPE keyword and returned a clean
+                    // two-child LikeExpr. Require it.
+                    auto* escape = parse_expression(5 /* PREC_COMP + 1 */);
+                    if (!escape) {
+                        error("expected an escape character after ESCAPE");
+                        return nullptr;
                     }
+                    escape->parent = like_node;
+                    pattern->next_sibling = escape;
+                    like_node->child_count = 3;
                 }
 
                 left = like_node;
@@ -1545,6 +1560,12 @@ ast::ASTNode* Parser::parse_cast_expression() {
             }
             type_node->primary_text = copy_to_arena(type_text);
         }
+    } else {
+        // The target type after AS is mandatory: `CAST(1 AS)` previously built a
+        // CastExpr with only the value child and no type node, returning a clean
+        // parse. Reject, matching the `::type` and cast-array-suffix paths.
+        error("expected a type name after AS in CAST");
+        return nullptr;
     }
 
     // Expect closing parenthesis
@@ -1806,12 +1827,17 @@ ast::ASTNode* Parser::parse_extract_expression() {
     // column-only operand parser took the leading type keyword of a typed literal
     // as a bare column and left the literal dangling, so a legal
     // `EXTRACT(YEAR FROM DATE '2020-01-01')` failed to parse.
-    ast::ASTNode* temporal_expr = nullptr;
-    if (current_token_ && current_token_->value != ")") {
-        temporal_expr = parse_expression(0);
-        if (!temporal_expr) {
-            return nullptr;
-        }
+    // The source expression is mandatory: `EXTRACT(YEAR FROM)` previously built
+    // an EXTRACT node with only the field child (no source) and returned a clean
+    // parse. Require it, matching the missing-field and missing-FROM rejections
+    // above.
+    if (!current_token_ || current_token_->value == ")") {
+        error("expected an expression after FROM in EXTRACT");
+        return nullptr;
+    }
+    ast::ASTNode* temporal_expr = parse_expression(0);
+    if (!temporal_expr) {
+        return nullptr;
     }
 
     // Expect closing parenthesis
@@ -1819,7 +1845,7 @@ ast::ASTNode* Parser::parse_extract_expression() {
         return nullptr;
     }
     advance(); // consume )
-    
+
     // Set up children: temporal_part and temporal_expression
     if (temporal_part) {
         temporal_part->parent = extract_node;
