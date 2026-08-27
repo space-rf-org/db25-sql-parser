@@ -337,3 +337,35 @@ TEST_F(GroupByTest, GroupingKeywordAsColumnName) {
     ASSERT_NE(gbe->first_child, nullptr);
     EXPECT_NE(gbe->first_child->node_type, NodeType::GroupingElement);
 }
+
+// `GROUP BY ()` is the empty grouping set (the "grand total"): the query groups
+// all rows into ONE group. The empty `()` is not a parseable expression, so it
+// used to yield a null grouping item and (staying lenient about an empty GROUP
+// BY) get dropped entirely - no GroupByClause node at all - which made the
+// analyzer see an ungrouped query and accept a non-aggregated column. Emit a
+// childless GroupByClause so the query is grouped with zero keys.
+TEST_F(GroupByTest, EmptyGroupingSet) {
+    auto* ast = parse("SELECT COUNT(*) FROM employees GROUP BY ()");
+    ASSERT_NE(ast, nullptr);
+    auto* group_by = find_node_by_type(ast, NodeType::GroupByClause);
+    ASSERT_NE(group_by, nullptr);  // the clause must NOT be dropped
+    EXPECT_EQ(group_by->child_count, 0);       // grand total: no grouping keys
+    EXPECT_EQ(group_by->first_child, nullptr);
+
+    // It is emitted regardless of the select list (the analyzer, not the parser,
+    // decides whether a bare column is legal under it).
+    auto* ast2 = parse("SELECT dept FROM employees GROUP BY ()");
+    ASSERT_NE(ast2, nullptr);
+    auto* gb2 = find_node_by_type(ast2, NodeType::GroupByClause);
+    ASSERT_NE(gb2, nullptr);
+    EXPECT_EQ(gb2->child_count, 0);
+
+    // Guard: `GROUP BY (dept)` is a PARENTHESIZED grouping column, NOT the empty
+    // set - one key, not zero.
+    auto* ast3 = parse("SELECT dept FROM employees GROUP BY (dept)");
+    ASSERT_NE(ast3, nullptr);
+    auto* gb3 = find_node_by_type(ast3, NodeType::GroupByClause);
+    ASSERT_NE(gb3, nullptr);
+    EXPECT_EQ(gb3->child_count, 1);
+    ASSERT_NE(gb3->first_child, nullptr);
+}
