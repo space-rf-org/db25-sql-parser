@@ -150,8 +150,19 @@ TEST(ParserNegativeTest, ValidSetOperationsStillParse) {
     EXPECT_TRUE(parser.parse("SELECT a FROM t EXCEPT SELECT b FROM t").has_value());
 }
 
+// An unclosed `::type(...)` cast type-parameter list must be a syntax error, not
+// silently accepted by swallowing the rest of the statement (clause keywords
+// included) as "type parameters". `SELECT x::VARCHAR(10 FROM t` used to parse to
+// a CastExpr with FROM/WHERE deleted.
+TEST(ParserNegativeTest, UnclosedCastTypeParamsRejected) {
+    expect_parse_error("SELECT x::VARCHAR(10 FROM t WHERE a = 1");
+    expect_parse_error("SELECT x::int(1 FROM t");
+    expect_parse_error("SELECT a FROM t WHERE b = x::int(1 AND c > 5 GROUP BY d");
+    expect_parse_error("SELECT x::DECIMAL(10, 2 FROM t");
+}
+
 // Guards: real `::type` casts and COLLATE names (which ARE keywords for the
-// types, but not clause keywords) still parse.
+// types, but not clause keywords) still parse - including parameterized types.
 TEST(ParserNegativeTest, RealCastAndCollateStillParse) {
     Parser parser;
     EXPECT_TRUE(parser.parse("SELECT a::int FROM t").has_value());
@@ -159,6 +170,10 @@ TEST(ParserNegativeTest, RealCastAndCollateStillParse) {
     EXPECT_TRUE(parser.parse("SELECT a::TIMESTAMP, b::DATE FROM t").has_value());
     parser.reset();
     EXPECT_TRUE(parser.parse("SELECT a::int::text FROM t WHERE b > 0").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a::VARCHAR(100) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a::DECIMAL(10, 2) FROM t").has_value());
     parser.reset();
     EXPECT_TRUE(parser.parse("SELECT name COLLATE \"C\" FROM t").has_value());
     parser.reset();
