@@ -161,6 +161,40 @@ TEST(ParserNegativeTest, UnclosedCastTypeParamsRejected) {
     expect_parse_error("SELECT x::DECIMAL(10, 2 FROM t");
 }
 
+// An unclosed `::type[...]` array-type suffix (the array sibling of the `(...)`
+// type-parameter list above) must be a syntax error, not silently dropped. The
+// `::` shorthand had no closing delimiter to catch it, so `SELECT x::int[3 FROM
+// t` consumed the `[3` and continued as a plain `::int` cast, deleting the
+// tokens; a malformed cast inside a function argument (`f(x::int[9 , y)`) was
+// swallowed by the argument loop resyncing on the comma. The full CAST form is
+// covered too: `CAST(x AS int[3)` used to drop `[3` and close on the `)`.
+TEST(ParserNegativeTest, UnclosedCastArraySuffixRejected) {
+    expect_parse_error("SELECT x::int[3 FROM t WHERE a = 1");
+    expect_parse_error("SELECT x::int[ FROM t");
+    expect_parse_error("SELECT x::int[3");                  // at EOF
+    expect_parse_error("SELECT f(x::int[9 , y) FROM t");    // malformed cast in a fn arg
+    expect_parse_error("SELECT f(x::int[9) FROM t");
+    expect_parse_error("SELECT CAST(x AS int[3) FROM t");   // full CAST form
+    expect_parse_error("SELECT CAST(x AS int[3 FROM t");
+}
+
+// Guards: well-formed array-type casts (sized, empty, multi-dimensional) in both
+// the `::` shorthand and the full CAST form still parse.
+TEST(ParserNegativeTest, ValidArrayCastsStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT x::int[3] FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT x::int[] FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT x::int[][] FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT f(x::int[9], y) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT CAST(x AS int[3]) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT CAST(x AS int[]) FROM t").has_value());
+}
+
 // Guards: real `::type` casts and COLLATE names (which ARE keywords for the
 // types, but not clause keywords) still parse - including parameterized types.
 TEST(ParserNegativeTest, RealCastAndCollateStillParse) {
