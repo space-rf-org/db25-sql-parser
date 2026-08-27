@@ -1455,21 +1455,30 @@ ast::ASTNode* Parser::parse_group_by_clause() {
         return group_node;
     }
 
-    // GROUP BY () - the empty grouping set (the "grand total"): a single group
-    // over all rows, standard SQL. Emit a GroupByClause with NO keys rather than
-    // dropping it: the empty `()` is not a parseable expression, so the regular
-    // item path below would get a null first_item and (staying lenient about an
-    // empty GROUP BY) abandon the whole clause, leaving the query looking
-    // ungrouped - so `SELECT dept FROM emp GROUP BY ()` wrongly accepted the
-    // non-aggregated `dept`. A childless GroupByClause makes the analyzer treat
-    // the query as grouped with zero keys (every non-aggregated column illegal)
-    // and the binder collapse it to one group, matching PostgreSQL. Only the bare
-    // `()` is the empty set; `(a)` / `(a, b)` are parenthesized grouping columns
-    // handled by the expression path below.
-    if (current_token_ && current_token_->value == "(" &&
-        peek_token_ && peek_token_->value == ")") {
+    // A `()` grouping element is the EMPTY grouping set - the identity of the
+    // grouping-set cross product: it contributes NO grouping column. So `GROUP BY
+    // ()` alone is the grand total (a single group over all rows), and `GROUP BY
+    // (), dept` == `GROUP BY dept`. Skip any LEADING `()` elements here; if the
+    // whole list turns out to be empty sets, emit a childless GroupByClause (the
+    // analyzer then treats the query as grouped with zero keys and the binder
+    // collapses it to one group, matching PostgreSQL). Without this, the empty
+    // `()` (which is not a parseable expression) made the regular item path get a
+    // null first_item and, staying lenient about an empty GROUP BY, abandon the
+    // whole clause - so `SELECT dept FROM emp GROUP BY ()` wrongly looked
+    // ungrouped; and returning early on the FIRST `()` silently dropped the rest
+    // of the list plus any trailing HAVING/ORDER BY/LIMIT (`GROUP BY (), dept`
+    // collapsed to a grand total, losing `dept`). Only a bare `()` is the empty
+    // set; `(a)` / `(a, b)` are parenthesized grouping columns handled below.
+    while (current_token_ && current_token_->value == "(" &&
+           peek_token_ && peek_token_->value == ")") {
         advance();  // consume (
         advance();  // consume )
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
+            current_token_->value == ",") {
+            advance();  // consume comma; more grouping elements follow
+            continue;
+        }
+        // `()` was the last (or only) element: the whole list is empty sets.
         pop_context();
         return group_node;  // childless: the grand-total grouping set
     }
@@ -1510,6 +1519,16 @@ ast::ASTNode* Parser::parse_group_by_clause() {
     while (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
            current_token_->value == ",") {
         advance(); // consume comma
+
+        // A `()` empty grouping set in a non-first position contributes no column
+        // (see the leading skip above), so drop it and continue the list:
+        // `GROUP BY dept, ()` == `GROUP BY dept`, `dept, (), sal` == `dept, sal`.
+        if (current_token_ && current_token_->value == "(" &&
+            peek_token_ && peek_token_->value == ")") {
+            advance();  // consume (
+            advance();  // consume )
+            continue;
+        }
 
         // A ROLLUP(...) / CUBE(...) / GROUPING SETS(...) grouping construct as a
         // non-first item is a comma-separated list of grouping elements: legal SQL
