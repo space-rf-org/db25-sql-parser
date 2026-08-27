@@ -300,6 +300,72 @@ TEST(ParserNegativeTest, CaseWhenMissingThenRejected) {
     expect_parse_error("SELECT CASE WHEN x ELSE 0 END FROM t");
 }
 
+// A prefix unary operator (NOT / unary - / unary +) with no operand -- a binary
+// operator or clause keyword sitting where the operand belongs -- previously
+// built a CHILDLESS UnaryExpr that parse() returned success for; the analyzer
+// then blessed it clean and the binder could not lower it. The operand is
+// mandatory.
+TEST(ParserNegativeTest, UnaryOperatorMissingOperandRejected) {
+    expect_parse_error("SELECT NOT > 5 FROM t");
+    expect_parse_error("SELECT NOT = 5 FROM t");
+    expect_parse_error("SELECT - > 5 FROM t");
+    expect_parse_error("SELECT + > 5 FROM t");
+    expect_parse_error("SELECT id FROM t WHERE age > 1 AND NOT > 2");
+    expect_parse_error("SELECT CASE WHEN NOT > 1 THEN 1 ELSE 0 END FROM t");
+}
+
+// Guard: well-formed unary operators still parse.
+TEST(ParserNegativeTest, ValidUnaryOperatorsStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT NOT (a > 5) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT NOT a FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT -a, +b, -5 FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE NOT EXISTS (SELECT 1)").has_value());
+}
+
+// ON CONFLICT DO UPDATE SET, the ON CONFLICT conflict target, and RETURNING all
+// broke on a missing required element without error(): DO UPDATE SET accepted an
+// empty or value-less assignment list, the conflict-target loop silently skipped
+// a non-identifier (fabricating a different column list), and RETURNING accepted
+// an empty output list. All must be rejected.
+TEST(ParserNegativeTest, UpsertReturningTruncationRejected) {
+    // DO UPDATE SET: empty, missing '=' value, and value-less then a clause kw.
+    expect_parse_error("INSERT INTO t VALUES (1,2) ON CONFLICT (a) DO UPDATE SET");
+    expect_parse_error("INSERT INTO t VALUES (1,2) ON CONFLICT (a) DO UPDATE SET b");
+    expect_parse_error("INSERT INTO t VALUES (1,2) ON CONFLICT (a) DO UPDATE SET b WHERE x = 1");
+    expect_parse_error("INSERT INTO t VALUES (1,2) ON CONFLICT (a) DO UPDATE SET b =");
+    // ON CONFLICT conflict target: an index-expression target is not a column
+    // list and must not be silently split into separate columns.
+    expect_parse_error("INSERT INTO t VALUES (1,2) ON CONFLICT (a + b) DO NOTHING");
+    expect_parse_error("INSERT INTO t VALUES (1,2) ON CONFLICT (lower(a)) DO NOTHING");
+    // RETURNING with no output list (INSERT helper, inline UPDATE, inline DELETE).
+    expect_parse_error("INSERT INTO t DEFAULT VALUES RETURNING");
+    expect_parse_error("UPDATE t SET a = 1 RETURNING");
+    expect_parse_error("DELETE FROM t WHERE a = 1 RETURNING");
+}
+
+// Guard: well-formed UPSERT and RETURNING forms still parse.
+TEST(ParserNegativeTest, ValidUpsertReturningStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse(
+        "INSERT INTO t VALUES (1,2) ON CONFLICT (a) DO UPDATE SET b = 2").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse(
+        "INSERT INTO t VALUES (1,2) ON CONFLICT (a, c) DO UPDATE SET b = 2, d = 3 WHERE b > 0")
+                    .has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("INSERT INTO t VALUES (1,2) ON CONFLICT (a) DO NOTHING").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("INSERT INTO t DEFAULT VALUES RETURNING *").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("UPDATE t SET a = 1 RETURNING a, b").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("DELETE FROM t WHERE a = 1 RETURNING *").has_value());
+}
+
 // Guard: well-formed CASE expressions (searched and simple, with/without ELSE)
 // still parse.
 TEST(ParserNegativeTest, ValidCaseExpressionsStillParse) {
