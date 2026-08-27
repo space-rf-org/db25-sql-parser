@@ -466,9 +466,21 @@ ast::ASTNode* Parser::parse_primary_expression() {
                     break;
                 }
             }
-            if (current_token_ && current_token_->value == "]") {
-                advance(); // consume ']'
+            // The `[` must be closed. Breaking out with a missing `]` (a bad
+            // element, or a missing comma between elements: `ARRAY[1 2]`) and
+            // returning the truncated array accepted the malformed constructor
+            // AND silently dropped the rest of the statement - `[` is not tracked
+            // by parenthesis_depth_, and if no element sub-expression called
+            // error() the has_error_ backstop never fired, so `SELECT ARRAY[1 2]
+            // FROM t WHERE ...` parsed as SUCCESS with the FROM/WHERE deleted.
+            // Require the `]`, mirroring the VALUES/ROLLUP row loops and the
+            // ::type[...] cast-array suffix. (An empty `ARRAY[]` and a trailing
+            // comma `ARRAY[1,]` both leave the `]` in place and are unaffected.)
+            if (!current_token_ || current_token_->value != "]") {
+                error("expected ']' to close the ARRAY constructor");
+                return nullptr;
             }
+            advance(); // consume ']'
             return array_node;
         }
 
