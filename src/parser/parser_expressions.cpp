@@ -14,10 +14,13 @@ namespace db25::parser {
 
 namespace {
 // A clause-introducing keyword terminates an expression - it is never a value
-// operand, a cast type name, or a collation name. This is the same set
-// get_precedence() stops the operator loop on. Reserved-but-usable keywords
-// (type names like INTEGER/DATE/TIMESTAMP, collation names) are NOT in this set,
-// so they keep parsing.
+// operand, a cast type name, or a collation name. Covers the clause keywords
+// get_precedence() stops the operator loop on PLUS the set operators and other
+// clause / statement boundaries (a set operator or clause keyword after `::` /
+// COLLATE / a binary operator must be a syntax error, not swallowed as a bogus
+// name that deletes the following query branch or clause). Reserved-but-usable
+// keywords (type names like INTEGER/DATE/TIMESTAMP, collation names) are NOT in
+// this set, so they keep parsing.
 [[nodiscard]] bool is_clause_boundary_keyword(db25::Keyword kw) noexcept {
     switch (kw) {
         case db25::Keyword::FROM:
@@ -27,6 +30,12 @@ namespace {
         case db25::Keyword::ORDER:
         case db25::Keyword::LIMIT:
         case db25::Keyword::OFFSET:
+        case db25::Keyword::UNION:
+        case db25::Keyword::INTERSECT:
+        case db25::Keyword::EXCEPT:
+        case db25::Keyword::WINDOW:
+        case db25::Keyword::INTO:
+        case db25::Keyword::FETCH:
             return true;
         default:
             return false;

@@ -125,6 +125,31 @@ TEST(ParserNegativeTest, CollateToClauseKeywordRejected) {
     expect_parse_error("SELECT a COLLATE");           // missing collation name
 }
 
+// A set operator (UNION/INTERSECT/EXCEPT) or other clause keyword after `::`,
+// COLLATE, or a binary operator must be a syntax error, not swallowed as a bogus
+// type/collation/operand that deletes the following query branch. `SELECT a::
+// UNION SELECT b` used to parse to a single SELECT with UNION absorbed as the
+// cast type.
+TEST(ParserNegativeTest, SetOpKeywordNotAbsorbedAsOperand) {
+    expect_parse_error("SELECT a:: UNION SELECT b FROM t");
+    expect_parse_error("SELECT a + UNION SELECT b");
+    expect_parse_error("SELECT a COLLATE INTERSECT SELECT b");
+    expect_parse_error("SELECT a:: EXCEPT SELECT b");
+    expect_parse_error("SELECT a:: WINDOW w AS ()");
+}
+
+// Guard: a VALID set operation still parses (the guard only fires when the set
+// operator is in operand / type / collation position, never as the real
+// branch separator).
+TEST(ParserNegativeTest, ValidSetOperationsStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT a::int FROM t UNION SELECT b FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a FROM t INTERSECT SELECT b FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT a FROM t EXCEPT SELECT b FROM t").has_value());
+}
+
 // Guards: real `::type` casts and COLLATE names (which ARE keywords for the
 // types, but not clause keywords) still parse.
 TEST(ParserNegativeTest, RealCastAndCollateStillParse) {
