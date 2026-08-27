@@ -1421,9 +1421,19 @@ ast::ASTNode* Parser::parse_collate_postfix(ast::ASTNode* operand) {
     // binds tighter than any binary operator, so it is applied as a postfix to
     // the primary immediately after it is parsed. The collation name is stored
     // on the CollateClause's schema_name; the annotated value is its one child.
+    // Like the binary-operator and ::cast folds, this COLLATE chain is iterative
+    // and so escapes the recursion DepthGuard; cap the cumulative depth so a
+    // pathological `a COLLATE "C" COLLATE "C" ...` chain is rejected rather than
+    // building an unbounded tree that overflows downstream recursive walkers.
+    std::size_t collate_count = 0;
     while (operand != nullptr && current_token_ &&
            current_token_->type == tokenizer::TokenType::Keyword &&
            current_token_->keyword_id == db25::Keyword::COLLATE) {
+        if (current_depth_ + collate_count >= config_.max_depth) {
+            depth_exceeded_ = true;
+            break;  // chain too deep: parse() surfaces the depth-exceeded error
+        }
+        ++collate_count;
         advance();  // consume COLLATE
         auto* node = arena_.allocate<ast::ASTNode>();
         new (node) ast::ASTNode(ast::NodeType::CollateClause);

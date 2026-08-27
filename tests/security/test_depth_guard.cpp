@@ -132,6 +132,18 @@ std::string generate_cast_chain(int ops) {
     return sql.str();
 }
 
+// A flat postfix COLLATE chain: `a COLLATE "C" COLLATE "C" ...` (`ops` collates).
+// Folded iteratively in parse_collate_postfix, the same hazard.
+std::string generate_collate_chain(int ops) {
+    std::stringstream sql;
+    sql << "SELECT a";
+    for (int i = 0; i < ops; ++i) {
+        sql << " COLLATE \"C\"";
+    }
+    sql << " FROM t";
+    return sql.str();
+}
+
 }  // namespace
 
 // A flat set-op chain within the limit parses (the AST is bounded, so the
@@ -209,6 +221,23 @@ TEST(DepthGuard, DeepCastChainRejected) {
     auto result = parser.parse(generate_cast_chain(static_cast<int>(limit) * 3));
     ASSERT_FALSE(result.has_value())
         << "Deep flat cast chain must be rejected by the depth cap";
+    EXPECT_EQ(result.error().message, kDepthError);
+}
+
+// The same for a flat COLLATE chain.
+TEST(DepthGuard, ShallowCollateChainParses) {
+    Parser parser;
+    auto result = parser.parse(generate_collate_chain(50));
+    ASSERT_TRUE(result.has_value())
+        << "Shallow collate chain should parse, got error: " << result.error().message;
+}
+
+TEST(DepthGuard, DeepCollateChainRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    auto result = parser.parse(generate_collate_chain(static_cast<int>(limit) * 3));
+    ASSERT_FALSE(result.has_value())
+        << "Deep flat collate chain must be rejected by the depth cap";
     EXPECT_EQ(result.error().message, kDepthError);
 }
 
