@@ -1455,10 +1455,29 @@ ast::ASTNode* Parser::parse_group_by_clause() {
         return group_node;
     }
 
+    // GROUP BY () - the empty grouping set (the "grand total"): a single group
+    // over all rows, standard SQL. Emit a GroupByClause with NO keys rather than
+    // dropping it: the empty `()` is not a parseable expression, so the regular
+    // item path below would get a null first_item and (staying lenient about an
+    // empty GROUP BY) abandon the whole clause, leaving the query looking
+    // ungrouped - so `SELECT dept FROM emp GROUP BY ()` wrongly accepted the
+    // non-aggregated `dept`. A childless GroupByClause makes the analyzer treat
+    // the query as grouped with zero keys (every non-aggregated column illegal)
+    // and the binder collapse it to one group, matching PostgreSQL. Only the bare
+    // `()` is the empty set; `(a)` / `(a, b)` are parenthesized grouping columns
+    // handled by the expression path below.
+    if (current_token_ && current_token_->value == "(" &&
+        peek_token_ && peek_token_->value == ")") {
+        advance();  // consume (
+        advance();  // consume )
+        pop_context();
+        return group_node;  // childless: the grand-total grouping set
+    }
+
     // Regular GROUP BY items
     // Parse first GROUP BY item
     ast::ASTNode* first_item = nullptr;
-    
+
     // Could be a number (GROUP BY 1, 2), expression, or column
     if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
         // GROUP BY position
