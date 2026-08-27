@@ -112,6 +112,27 @@ ParseResult Parser::parse(std::string_view sql) {
         });
     }
     
+    // A hard error may have been RECORDED while a recovery loop still returned a
+    // non-null node. error() records the first error and, per its contract,
+    // relies on the caller returning nullptr so the failure unwinds to here as a
+    // ParseError - but a few break-on-null loops (a malformed sub-expression
+    // inside a ROLLUP/CUBE/GROUPING SETS element, or a VALUES row) drop the bad
+    // fragment, return the enclosing node, and consume the rest, so has_error_ is
+    // set yet root is non-null. Without this check parse() would return that
+    // silently-truncated AST as SUCCESS (e.g. `INSERT INTO t VALUES (1 + )` bound
+    // to an INSERT of an empty row). Surface the recorded error even with a
+    // non-null root, completing the error() contract. (Benign break-on-null - an
+    // empty list with no error() call - leaves has_error_ false and is unaffected.)
+    if (has_error_) {
+        uint32_t line = current_token_ ? current_token_->line : 1;
+        uint32_t col = current_token_ ? current_token_->column : 1;
+        uint32_t pos = tokenizer_ ? tokenizer_->position() : 0;
+        delete tokenizer_;
+        tokenizer_ = nullptr;
+        return std::unexpected(ParseError{
+            line, col, pos, error_message_, sql.substr(0, 50)});
+    }
+
     // Check for unbalanced parentheses
     if (parenthesis_depth_ != 0) {
         uint32_t line = current_token_ ? current_token_->line : 1;
@@ -224,11 +245,23 @@ Parser::parse_script(std::string_view sql) {
             }
             break;
         }
-        
+
+        // A statement may have RECORDED a hard error while a recovery loop still
+        // returned a (truncated) node - see the has_error_ backstop in parse().
+        // Surface it rather than accept a silently malformed statement into the
+        // script.
+        if (has_error_) {
+            uint32_t line = current_token_ ? current_token_->line : 1;
+            uint32_t col = current_token_ ? current_token_->column : 1;
+            uint32_t pos = current_token_ ? static_cast<uint32_t>(current_token_->column) : 0;
+            return std::unexpected(ParseError{
+                line, col, pos, error_message_, sql.substr(pos, 50)});
+        }
+
         statements.push_back(stmt);
-        
+
         // Consume optional semicolon after statement
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter && 
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
             current_token_->value == ";") {
             advance();
         }
