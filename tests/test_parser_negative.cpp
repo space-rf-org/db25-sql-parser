@@ -230,6 +230,33 @@ TEST(ParserNegativeTest, ValidArrayCastsStillParse) {
     EXPECT_TRUE(parser.parse("SELECT CAST(x AS int[]) FROM t").has_value());
 }
 
+// An unclosed ARRAY[...] constructor must FAIL, not be silently truncated. Its
+// element loop is a break-on-null recovery loop that neither called error() nor
+// required the closing ']', and '[' is not tracked by the parenthesis-balance
+// check - so `SELECT ARRAY[1 2] FROM t WHERE ...` dropped the second element AND
+// the whole FROM/WHERE tail and parsed as success. Sibling of the VALUES/ROLLUP
+// row loops and the ::type[...] cast-array suffix.
+TEST(ParserNegativeTest, UnclosedArrayConstructorRejected) {
+    expect_parse_error("SELECT ARRAY[1 2] FROM t WHERE y > 5");  // missing comma
+    expect_parse_error("SELECT ARRAY[1 2]");                     // at EOF
+    expect_parse_error("SELECT ARRAY[1, 2 FROM t");              // unclosed
+    expect_parse_error("SELECT ARRAY[1, FROM] FROM t");          // clause kw element
+    expect_parse_error("SELECT ARRAY[1, 2+] FROM t");            // malformed element
+}
+
+// Guards: well-formed ARRAY constructors - multi-element, empty, trailing comma,
+// with a following clause - still parse.
+TEST(ParserNegativeTest, ValidArrayConstructorsStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT ARRAY[1, 2, 3] FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT ARRAY[] FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT ARRAY[1, 2] FROM t WHERE y > 5").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT ARRAY[a, b] FROM t").has_value());
+}
+
 // Guards: real `::type` casts and COLLATE names (which ARE keywords for the
 // types, but not clause keywords) still parse - including parameterized types.
 TEST(ParserNegativeTest, RealCastAndCollateStillParse) {
