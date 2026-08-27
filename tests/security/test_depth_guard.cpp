@@ -144,6 +144,23 @@ std::string generate_collate_chain(int ops) {
     return sql.str();
 }
 
+// An ALTERNATING postfix chain `a COLLATE "C"::int COLLATE "C"::int ...`
+// (`pairs` collate/cast pairs, AST depth ~= 2*pairs). Each pass through the
+// outer postfix loop applies one COLLATE and one ::cast; before the shared
+// fold budget, each helper's per-call counter reset to 0 every pass, so this
+// interleaving bypassed the per-fold caps and built an unbounded left-deep AST
+// even though a pure COLLATE (or pure ::cast) chain of the same depth is
+// rejected.
+std::string generate_alternating_postfix_chain(int pairs) {
+    std::stringstream sql;
+    sql << "SELECT a";
+    for (int i = 0; i < pairs; ++i) {
+        sql << " COLLATE \"C\"::int";
+    }
+    sql << " FROM t";
+    return sql.str();
+}
+
 }  // namespace
 
 // A flat set-op chain within the limit parses (the AST is bounded, so the
@@ -238,6 +255,33 @@ TEST(DepthGuard, DeepCollateChainRejected) {
     auto result = parser.parse(generate_collate_chain(static_cast<int>(limit) * 3));
     ASSERT_FALSE(result.has_value())
         << "Deep flat collate chain must be rejected by the depth cap";
+    EXPECT_EQ(result.error().message, kDepthError);
+}
+
+// A shallow alternating COLLATE/::cast postfix chain (well under the cap even
+// counting both folds) still parses.
+TEST(DepthGuard, ShallowAlternatingPostfixChainParses) {
+    Parser parser;
+    auto result = parser.parse(generate_alternating_postfix_chain(25));  // depth ~50
+    ASSERT_TRUE(result.has_value())
+        << "Shallow alternating postfix chain should parse, got error: "
+        << (result.has_value() ? std::string{} : result.error().message);
+}
+
+// A deep alternating COLLATE/::cast postfix chain must be rejected: the two
+// folds share one budget, so interleaving them cannot slip past the cap. Uses
+// enough pairs that the combined depth (2*pairs) exceeds max_depth even though
+// neither the collate count nor the cast count alone does.
+TEST(DepthGuard, DeepAlternatingPostfixChainRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    // limit pairs -> ~2*limit AST depth; each individual fold kind is only
+    // `limit` deep, so a per-helper counter would accept it.
+    auto result =
+        parser.parse(generate_alternating_postfix_chain(static_cast<int>(limit)));
+    ASSERT_FALSE(result.has_value())
+        << "Deep alternating COLLATE/::cast postfix chain must be rejected by the "
+           "shared depth cap";
     EXPECT_EQ(result.error().message, kDepthError);
 }
 
