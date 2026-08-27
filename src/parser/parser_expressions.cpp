@@ -1633,6 +1633,13 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand,
             int paren_depth = 1;
             std::string type_params;
             while (current_token_ && paren_depth > 0) {
+                // A clause-introducing keyword can never appear inside a type-
+                // parameter list; stop so the missing `)` is reported here
+                // instead of swallowing the rest of the statement.
+                if (current_token_->type == tokenizer::TokenType::Keyword &&
+                    is_clause_boundary_keyword(current_token_->keyword_id)) {
+                    break;
+                }
                 if (current_token_->value == "(") {
                     paren_depth++;
                 } else if (current_token_->value == ")") {
@@ -1642,9 +1649,17 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand,
                 type_params += std::string(current_token_->value);
                 advance();
             }
-            if (current_token_ && current_token_->value == ")") {
-                advance();  // consume final )
+            // The `(` must be closed. An unclosed `::type(...` (e.g.
+            // `x::VARCHAR(10 FROM t`) previously consumed every following token -
+            // clause keywords included - as "type parameters" and reported
+            // success, silently deleting the swallowed FROM/WHERE/... clauses.
+            // Require the `)`, matching the full CAST(... AS type(...)) form.
+            if (paren_depth != 0 || !current_token_ ||
+                current_token_->value != ")") {
+                error("expected ')' to close the cast type-parameter list");
+                return nullptr;
             }
+            advance();  // consume final )
             if (!type_params.empty()) {
                 type_node->schema_name = copy_to_arena(type_params);
             }
