@@ -313,6 +313,56 @@ TEST(ParserNegativeTest, ValidCaseExpressionsStillParse) {
     EXPECT_TRUE(parser.parse("SELECT CASE x WHEN 1 THEN 'a' ELSE 'z' END FROM t").has_value());
 }
 
+// More break-on-null / missing-required-keyword silent-truncation sites, in the
+// JOIN, aggregate-FILTER, and window-spec grammar. Each accepted a malformed
+// input while parse() returned success, silently dropping a required element:
+//   - JOIN ... ON with no condition -> conditionless (cartesian) join;
+//   - JOIN ... USING with no column list, or an empty USING () list;
+//   - aggregate FILTER with a missing/empty predicate -> the conditional
+//     aggregate silently becomes unconditional (a wrong result);
+//   - a window frame BETWEEN <start> with the required AND <end> missing;
+//   - a window frame unit with no valid bound (OVER (RANGE), empty BETWEEN
+//     start);
+//   - OVER (PARTITION BY) with no partition expression -> a partitioned window
+//     silently degrades to a whole-partition window.
+TEST(ParserNegativeTest, SilentlyTruncatedJoinFilterWindowRejected) {
+    // JOIN ON / USING.
+    expect_parse_error("SELECT * FROM a JOIN b ON");
+    expect_parse_error("SELECT * FROM a JOIN b USING");
+    expect_parse_error("SELECT * FROM a JOIN b USING ()");
+    // Aggregate FILTER.
+    expect_parse_error("SELECT count(*) FILTER (WHERE) FROM t");
+    expect_parse_error("SELECT count(*) FILTER () FROM t");
+    expect_parse_error("SELECT count(*) FILTER FROM t");
+    // Window frame.
+    expect_parse_error("SELECT sum(x) OVER (ROWS BETWEEN CURRENT ROW) FROM t");
+    expect_parse_error("SELECT sum(x) OVER (RANGE) FROM t");
+    expect_parse_error("SELECT sum(x) OVER (ROWS BETWEEN AND CURRENT ROW) FROM t");
+    // Window PARTITION BY.
+    expect_parse_error("SELECT rank() OVER (PARTITION BY) FROM t");
+}
+
+// Guards: well-formed JOIN conditions, USING lists, aggregate FILTER clauses,
+// and window frame/partition specs still parse.
+TEST(ParserNegativeTest, ValidJoinFilterWindowStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT * FROM a JOIN b ON a.id = b.id").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM a JOIN b USING (id)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM a JOIN b USING (id, x)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT count(*) FILTER (WHERE amount > 0) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT sum(x) OVER (ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT sum(x) OVER (ROWS UNBOUNDED PRECEDING) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT rank() OVER (PARTITION BY dept ORDER BY x) FROM t").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT rank() OVER (ORDER BY x) FROM t").has_value());
+}
+
 // Guards: well-formed comma FROM lists, set operations, and UPDATE assignments
 // still parse.
 TEST(ParserNegativeTest, ValidFromSetopUpdateStillParse) {

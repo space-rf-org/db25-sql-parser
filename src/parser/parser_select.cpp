@@ -1148,6 +1148,12 @@ ast::ASTNode* Parser::parse_join_clause() {
                 condition->parent = join_node;
                 table->next_sibling = condition;
                 join_node->child_count++;
+            } else {
+                // `JOIN b ON` with no parseable condition. ON syntactically
+                // requires a boolean predicate; dropping it silently would turn
+                // the join into an unconstrained (cartesian) join downstream.
+                // error() is surfaced by the parse() has_error_ backstop.
+                error("expected a join condition after ON");
             }
         }
         // Or a USING ( col [, col]* ) join column list. This is distinct from
@@ -1195,9 +1201,20 @@ ast::ASTNode* Parser::parse_join_clause() {
                     advance();
                 }
 
+                // USING () with an empty column list is not valid SQL: USING
+                // requires at least one shared column name. Reject rather than
+                // attach a childless join-column list.
+                if (using_clause->child_count == 0) {
+                    error("expected at least one column name in the USING list");
+                }
+
                 // Attach as the second child, after the joined table.
                 table->next_sibling = using_clause;
                 join_node->child_count++;
+            } else {
+                // `USING` not followed by `( col [, ...] )`. Dropping it would
+                // leave a join with no join columns and no diagnostic.
+                error("expected '(' with a column list after USING");
             }
         }
     }
@@ -2321,37 +2338,50 @@ ast::ASTNode* Parser::parse_function_call() {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::FILTER) {
         advance();  // consume FILTER
-        if (current_token_ && current_token_->value == "(") {
-            parenthesis_depth_++;
-            advance();  // consume '('
-            if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
-                current_token_->keyword_id == db25::Keyword::WHERE) {
-                advance();  // consume WHERE
-                ast::ASTNode* pred = parse_expression(0);
-                if (pred) {
-                    auto* where_node = arena_.allocate<ast::ASTNode>();
-                    new (where_node) ast::ASTNode(ast::NodeType::WhereClause);
-                    where_node->node_id = next_node_id_++;
-                    where_node->primary_text = copy_to_arena("FILTER");
-                    pred->parent = where_node;
-                    where_node->first_child = pred;
-                    where_node->child_count = 1;
-                    // Attach the FILTER clause as the call's last child.
-                    where_node->parent = func_call;
-                    if (func_call->first_child) {
-                        ast::ASTNode* last = func_call->first_child;
-                        while (last->next_sibling) last = last->next_sibling;
-                        last->next_sibling = where_node;
-                    } else {
-                        func_call->first_child = where_node;
-                    }
-                    func_call->child_count++;
-                }
-            }
-            if (current_token_ && current_token_->value == ")") {
-                if (parenthesis_depth_ > 0) parenthesis_depth_--;
-                advance();  // consume ')'
-            }
+        // FILTER syntactically requires `( WHERE <predicate> )`. A malformed
+        // FILTER clause must be rejected, not silently discarded: dropping it
+        // turns a conditional aggregate (COUNT(*) FILTER (WHERE cond)) into an
+        // unconditional one - a silent wrong result.
+        if (!current_token_ || current_token_->value != "(") {
+            error("expected '(' after FILTER");
+            return nullptr;
+        }
+        parenthesis_depth_++;
+        advance();  // consume '('
+        if (!current_token_ || current_token_->type != tokenizer::TokenType::Keyword ||
+            current_token_->keyword_id != db25::Keyword::WHERE) {
+            error("expected WHERE in the aggregate FILTER clause");
+            return nullptr;
+        }
+        advance();  // consume WHERE
+        ast::ASTNode* pred = parse_expression(0);
+        if (!pred) {
+            error("expected a predicate after WHERE in the aggregate FILTER clause");
+            return nullptr;
+        }
+        auto* where_node = arena_.allocate<ast::ASTNode>();
+        new (where_node) ast::ASTNode(ast::NodeType::WhereClause);
+        where_node->node_id = next_node_id_++;
+        where_node->primary_text = copy_to_arena("FILTER");
+        pred->parent = where_node;
+        where_node->first_child = pred;
+        where_node->child_count = 1;
+        // Attach the FILTER clause as the call's last child.
+        where_node->parent = func_call;
+        if (func_call->first_child) {
+            ast::ASTNode* last = func_call->first_child;
+            while (last->next_sibling) last = last->next_sibling;
+            last->next_sibling = where_node;
+        } else {
+            func_call->first_child = where_node;
+        }
+        func_call->child_count++;
+        if (current_token_ && current_token_->value == ")") {
+            if (parenthesis_depth_ > 0) parenthesis_depth_--;
+            advance();  // consume ')'
+        } else {
+            error("expected ')' to close the aggregate FILTER clause");
+            return nullptr;
         }
     }
 
@@ -2463,7 +2493,16 @@ ast::ASTNode* Parser::parse_window_spec() {
                     break;  // No more partition expressions
                 }
             }
-            
+
+            // PARTITION BY requires at least one expression. An empty partition
+            // list (the break-on-null loop above producing zero children) would
+            // silently degrade a partitioned window into a whole-partition
+            // window - a wrong result. error() is surfaced by the parse()
+            // has_error_ backstop.
+            if (partition_node->child_count == 0) {
+                error("expected at least one expression after PARTITION BY");
+            }
+
             // Add partition node to window spec
             if (!window_spec->first_child) {
                 window_spec->first_child = partition_node;
@@ -2667,7 +2706,14 @@ ast::ASTNode* Parser::parse_window_spec() {
             
             frame_node->first_child = frame_start;
             frame_node->child_count = 1;
-            
+
+            // A frame unit with no recognizable start bound (e.g.
+            // `ROWS BETWEEN AND CURRENT ROW`) leaves a contentless FrameBound;
+            // reject rather than pass a malformed frame downstream.
+            if (frame_start->primary_text.empty()) {
+                error("expected a frame start bound after BETWEEN");
+            }
+
             // Parse AND
             if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
                 current_token_->keyword_id == db25::Keyword::AND) {
@@ -2744,8 +2790,18 @@ ast::ASTNode* Parser::parse_window_spec() {
                     }
                 }
                 
+                if (frame_end->primary_text.empty()) {
+                    error("expected a frame end bound after AND");
+                }
                 frame_start->next_sibling = frame_end;
                 frame_node->child_count++;
+            } else {
+                // The BETWEEN frame form syntactically requires
+                // `BETWEEN <start> AND <end>`; a lone start bound mis-structures
+                // the frame (a binder cannot tell it from an intended
+                // single-bound frame). error() is surfaced by the parse()
+                // has_error_ backstop.
+                error("expected AND with a frame end bound in the BETWEEN frame");
             }
         } else {
             // Single-bound frame: ROWS/RANGE/GROUPS <bound> without BETWEEN,
@@ -2755,6 +2811,11 @@ ast::ASTNode* Parser::parse_window_spec() {
             // tracking is left elevated and the parse fails as "Unclosed
             // parenthesis").
             auto* frame_bound = parse_frame_bound();
+            // A frame unit with no recognizable bound (e.g. `OVER (RANGE)`)
+            // yields a contentless FrameBound; reject rather than attach it.
+            if (frame_bound->primary_text.empty()) {
+                error("expected a valid frame bound after the frame unit");
+            }
             frame_node->first_child = frame_bound;
             frame_node->child_count = 1;
         }
