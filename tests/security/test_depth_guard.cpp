@@ -108,6 +108,30 @@ std::string generate_setop_chain(int ops) {
     return sql.str();
 }
 
+// A flat left-associative binary-operator chain: `1 + 1 + ... + 1` (`ops`
+// operators). Folded ITERATIVELY in parse_expression's operator loop, so - like
+// the set-op chain - it escapes the recursion guard and must be depth-capped or
+// it builds an unbounded left-deep AST that overflows downstream walkers.
+std::string generate_operator_chain(int ops) {
+    std::stringstream sql;
+    sql << "SELECT 1";
+    for (int i = 0; i < ops; ++i) {
+        sql << " + 1";
+    }
+    return sql.str();
+}
+
+// A flat postfix `::cast` chain: `1::int::int::...` (`ops` casts). Folded
+// iteratively in parse_cast_postfix, the same hazard.
+std::string generate_cast_chain(int ops) {
+    std::stringstream sql;
+    sql << "SELECT 1";
+    for (int i = 0; i < ops; ++i) {
+        sql << "::int";
+    }
+    return sql.str();
+}
+
 }  // namespace
 
 // A flat set-op chain within the limit parses (the AST is bounded, so the
@@ -149,6 +173,43 @@ TEST(DepthGuard, SetOpChainBoundaryHonored) {
     ASSERT_FALSE(bad.has_value())
         << "One operator past max_depth must be rejected";
     EXPECT_EQ(bad.error().message, kDepthError);
+}
+
+// A flat binary-operator chain within the limit parses; one far past it is
+// rejected with the standard depth error instead of building an unbounded
+// left-deep AST that overflows analyze/bind/optimize (the same hazard the
+// set-op chain cap addresses, for expression operators).
+TEST(DepthGuard, ShallowOperatorChainParses) {
+    Parser parser;
+    auto result = parser.parse(generate_operator_chain(50));
+    ASSERT_TRUE(result.has_value())
+        << "Shallow operator chain should parse, got error: " << result.error().message;
+}
+
+TEST(DepthGuard, DeepOperatorChainRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    auto result = parser.parse(generate_operator_chain(static_cast<int>(limit) * 3));
+    ASSERT_FALSE(result.has_value())
+        << "Deep flat operator chain must be rejected by the depth cap";
+    EXPECT_EQ(result.error().message, kDepthError);
+}
+
+// The same for a flat `::cast` chain.
+TEST(DepthGuard, ShallowCastChainParses) {
+    Parser parser;
+    auto result = parser.parse(generate_cast_chain(50));
+    ASSERT_TRUE(result.has_value())
+        << "Shallow cast chain should parse, got error: " << result.error().message;
+}
+
+TEST(DepthGuard, DeepCastChainRejected) {
+    Parser parser;
+    const size_t limit = parser.config().max_depth;
+    auto result = parser.parse(generate_cast_chain(static_cast<int>(limit) * 3));
+    ASSERT_FALSE(result.has_value())
+        << "Deep flat cast chain must be rejected by the depth cap";
+    EXPECT_EQ(result.error().message, kDepthError);
 }
 
 // A shallow chain of nested triggers stays under the limit and must parse. This

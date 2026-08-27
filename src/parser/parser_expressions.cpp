@@ -705,24 +705,41 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
     }
 
     // Loop to handle operators with precedence
+    // A left-associative chain (`a AND a AND ...`, `1+1+...`, `a||b||...`) is
+    // folded ITERATIVELY here, one level of left-deep AST per iteration. Unlike a
+    // nested subexpression - which re-enters the DepthGuarded parse_expression and
+    // so is bounded by config_.max_depth - this fold never touches the recursion
+    // guard, so without a cap it builds an AST whose depth == the operator count,
+    // unbounded, which then overflows every downstream recursive walker
+    // (analyze / bind / optimize) on otherwise-legal input. Bound the cumulative
+    // depth (this call's recursion depth + operators folded here) at max_depth and
+    // surface the standard depth-exceeded error, exactly as fold_set_operations
+    // does for a flat set-op chain (commit 196d58d).
+    std::size_t fold_count = 0;
     while (true) {
         int precedence = get_precedence();
-        
+
         // Check for invalid operators in strict mode
         if (strict_mode_ && precedence == -1) {
             // Invalid operator detected
             return nullptr;  // Fail the parse
         }
-        
+
         if (precedence < min_precedence) {
             break;  // Current operator has lower precedence
         }
-        
+
         // Special case: precedence 0 means stop parsing (not an expression operator)
         if (precedence == 0) {
             break;
         }
-        
+
+        if (current_depth_ + fold_count >= config_.max_depth) {
+            depth_exceeded_ = true;
+            break;  // chain too deep: stop folding; parse() surfaces the error
+        }
+        ++fold_count;
+
         // Save operator info
         std::string_view op_value = current_token_->value;
         auto token_type = current_token_->type;
@@ -1438,7 +1455,17 @@ ast::ASTNode* Parser::parse_cast_postfix(ast::ASTNode* operand) {
     // [value, Identifier(typename)], the type's parameters (e.g. ::VARCHAR(100))
     // stored on the type node's schema_name - so the analyzer and binder need no
     // change. Chained casts (`a::int::text`) fold left via the loop.
+    // Like the binary-operator fold, this cast chain is iterative and so escapes
+    // the recursion DepthGuard; cap the cumulative depth so a pathological
+    // `x::int::int...` chain is rejected rather than building an unbounded tree
+    // that overflows downstream recursive walkers.
+    std::size_t cast_count = 0;
     while (operand != nullptr && current_token_ && current_token_->value == "::") {
+        if (current_depth_ + cast_count >= config_.max_depth) {
+            depth_exceeded_ = true;
+            break;  // chain too deep: parse() surfaces the depth-exceeded error
+        }
+        ++cast_count;
         advance();  // consume ::
         if (!current_token_ ||
             (current_token_->type != tokenizer::TokenType::Identifier &&
