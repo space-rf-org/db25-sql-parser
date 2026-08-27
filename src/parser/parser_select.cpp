@@ -817,7 +817,12 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
             }
             ast::ASTNode* right = parse_setop_operand();
             if (!right) {
-                break;  // malformed RHS: keep the tree folded so far
+                // INTERSECT was consumed but no valid right operand follows
+                // (`SELECT a FROM t INTERSECT`); record the error so parse()
+                // surfaces it via the has_error_ backstop instead of silently
+                // returning the bare left arm (matches the UNION/EXCEPT path).
+                error("expected a query after the set operator (UNION/INTERSECT/EXCEPT)");
+                break;
             }
             if (over_setop_limit()) {
                 break;  // chain too deep: stop folding; parse() surfaces the error
@@ -863,7 +868,11 @@ ast::ASTNode* Parser::fold_set_operations(ast::ASTNode* first_operand) {
 
         ast::ASTNode* right_operand = parse_setop_operand();
         if (!right_operand) {
-            // Malformed right-hand side: keep the tree folded so far.
+            // The set-op keyword was consumed but no valid right operand
+            // follows (`SELECT a FROM t UNION` / `... UNION SELECT`). Record the
+            // error so parse() surfaces it via the has_error_ backstop instead
+            // of silently returning the bare left arm with the operator erased.
+            error("expected a query after the set operator (UNION/INTERSECT/EXCEPT)");
             break;
         }
         // The RHS binds any trailing INTERSECT chain before we fold at this level.
@@ -1007,13 +1016,24 @@ ast::ASTNode* Parser::parse_from_clause() {
             current_token_->value == ",") {
             advance(); // consume comma
 
-            if (auto* next_table = parse_table_reference()) {
-                next_table->parent = from_node;
-                // last_child is always valid (initialized to table_ref)
-                last_child->next_sibling = next_table;
-                last_child = next_table;
-                from_node->child_count++;
+            auto* next_table = parse_table_reference();
+            if (!next_table) {
+                // A comma promises another table reference. A null here means the
+                // item is malformed or an unsupported form the FROM parser emits
+                // no node for (e.g. comma-form `LATERAL (subq)`): record the error
+                // so parse() surfaces it via the has_error_ backstop rather than
+                // SILENTLY dropping the item and leaving `, LATERAL (...)` as
+                // trailing tokens - `FROM a, LATERAL (subq) l` used to parse as
+                // `FROM a`, and the analyzer then expanded `SELECT *` to only a's
+                // columns with no diagnostic.
+                error("expected a table reference after ',' in the FROM clause");
+                break;
             }
+            next_table->parent = from_node;
+            // last_child is always valid (initialized to table_ref)
+            last_child->next_sibling = next_table;
+            last_child = next_table;
+            from_node->child_count++;
         }
         // Handle JOIN keywords
         else if (current_token_->type == tokenizer::TokenType::Keyword) {

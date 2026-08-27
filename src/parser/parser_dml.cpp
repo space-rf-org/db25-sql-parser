@@ -351,15 +351,23 @@ ast::ASTNode* Parser::parse_update_stmt() {
             return nullptr;  // Expected '=' after the SET target
         }
         advance();  // consume =
-        
-        // Parse expression
+
+        // Parse the value expression. The `=` was consumed, so a value MUST
+        // follow. A null here (a clause keyword like WHERE/FROM/RETURNING after
+        // `=`, e.g. `SET a = WHERE id=1`) does not record an error on its own,
+        // so guard it - otherwise a value-less assignment node (no child) was
+        // emitted and the parse succeeded, handing the analyzer an assignment
+        // missing its required value. Matches the neighbouring `SET a b` /
+        // parenthesized-row rejections.
         auto* expr = parse_expression(0);
-        if (expr) {
-            expr->parent = assignment;
-            assignment->first_child = expr;
-            assignment->child_count = 1;
+        if (!expr) {
+            error("expected a value expression after '=' in the SET clause");
+            return nullptr;
         }
-        
+        expr->parent = assignment;
+        assignment->first_child = expr;
+        assignment->child_count = 1;
+
         assignment->parent = set_clause;
         if (!first_assignment) {
             first_assignment = assignment;
