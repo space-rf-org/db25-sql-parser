@@ -663,3 +663,62 @@ TEST(ParserNegativeTest, WithinGroupFixDoesNotBreakNormalCalls) {
     EXPECT_TRUE(parser.parse("SELECT count(*) FILTER (WHERE y > 0) FROM t").has_value());
     EXPECT_TRUE(parser.parse("SELECT sum(x) OVER (PARTITION BY g) FROM t").has_value());
 }
+
+// --- CREATE TABLE column-list defects (pass-29 audit) -----------------------
+// The CREATE TABLE element loop previously "recovered" from an unexpected token
+// by skipping to the next comma/paren, which silently swallowed invalid tokens
+// and whole subsequent columns while still returning a clean AST. And several
+// truncated column constraints (PRIMARY without KEY, NOT without NULL) consumed
+// their leading keyword then returned no constraint, so the definition loop
+// broke and the malformed tail parsed cleanly. These must all be rejected.
+
+// Junk between two column definitions must not be skipped over.
+TEST(ParserNegativeTest, CreateTableJunkBetweenColumns) {
+    expect_parse_error("CREATE TABLE t (a INT %%% b INT)");
+}
+
+// An empty column list defines a zero-column table (invalid, no CTAS body).
+TEST(ParserNegativeTest, CreateTableEmptyColumnList) {
+    expect_parse_error("CREATE TABLE t ()");
+}
+
+// A column-level PRIMARY constraint must be PRIMARY KEY.
+TEST(ParserNegativeTest, CreateTablePrimaryWithoutKey) {
+    expect_parse_error("CREATE TABLE t (a INT PRIMARY)");
+}
+
+// NOT must be followed by NULL in a column constraint.
+TEST(ParserNegativeTest, CreateTableNotWithoutNull) {
+    expect_parse_error("CREATE TABLE t (a INT NOT)");
+}
+
+// A dangling CONSTRAINT keyword with no constraint body is not a definition.
+TEST(ParserNegativeTest, CreateTableDanglingConstraintKeyword) {
+    expect_parse_error("CREATE TABLE t (a INT CONSTRAINT)");
+}
+
+// Guard: valid CREATE TABLE forms (including multi-dimensional array columns,
+// keyword-named columns like `data`, and the full complement of column
+// constraints) must still parse cleanly with no trailing tokens - the strict
+// element/constraint checks above must not over-reject.
+TEST(ParserNegativeTest, CreateTableValidFormsStillParse) {
+    Parser parser;
+    struct { const char* sql; } ok[] = {
+        {"CREATE TABLE t (a INT PRIMARY KEY)"},
+        {"CREATE TABLE t (a INT NOT NULL)"},
+        {"CREATE TABLE t (a INT, b TEXT)"},
+        {"CREATE TABLE t (a INTEGER[][])"},
+        {"CREATE TABLE t (data JSON)"},
+        {"CREATE TABLE t (a INT PRIMARY KEY, b TEXT NOT NULL, c INT UNIQUE)"},
+        {"CREATE TABLE t (a INT CHECK (a > 0))"},
+        {"CREATE TABLE t AS SELECT * FROM x"},
+    };
+    for (const auto& c : ok) {
+        auto r = parser.parse(c.sql);
+        EXPECT_TRUE(r.has_value()) << "expected clean parse for: [" << c.sql << "]";
+        if (r.has_value()) {
+            EXPECT_EQ(parser.trailing_token_count(), 0u)
+                << "unexpected trailing tokens for: [" << c.sql << "]";
+        }
+    }
+}

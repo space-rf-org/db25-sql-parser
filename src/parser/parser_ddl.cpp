@@ -479,26 +479,35 @@ ast::ASTNode* Parser::parse_data_type() {
             }
         }
         
-        // Handle array types: type[]
-        if (current_token_ && current_token_->value == "[") {
+        // Handle array types, including MULTI-DIMENSIONAL `type[][]`: consume
+        // every `[<size>?]` suffix. Only a single `[]` was handled before, so a
+        // column type like `INTEGER[][]` left the second `[]` unconsumed for the
+        // caller to trip over.
+        bool is_array = false;
+        while (current_token_ && current_token_->value == "[") {
             advance(); // consume [
-            
+
             // Optional array size
             if (current_token_ && current_token_->type == tokenizer::TokenType::Number) {
                 // Store array size somehow (could use hash_cache field)
                 type_node->hash_cache = parse_uint_or(current_token_->value, 0);
                 advance();
             }
-            
+
             if (current_token_ && current_token_->value == "]") {
                 advance(); // consume ]
-                type_node->flags = static_cast<ast::NodeFlags>(
-                    static_cast<uint8_t>(type_node->flags) | 0x80  // Custom flag for array type
-                );
+                is_array = true;
                 // Record array-ness in the type text so it is visible in the AST
                 type_node->primary_text =
                     copy_to_arena(std::string(type_node->primary_text) + "[]");
+            } else {
+                break;  // malformed suffix; leave for the caller to reject
             }
+        }
+        if (is_array) {
+            type_node->flags = static_cast<ast::NodeFlags>(
+                static_cast<uint8_t>(type_node->flags) | 0x80  // Custom flag for array type
+            );
         }
     }
     
@@ -514,22 +523,32 @@ ast::ASTNode* Parser::parse_column_constraint() {
     
     if (current_token_ && current_token_->keyword_id == db25::Keyword::NOT) {
         advance();
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_NULL) {
-            advance();
-            constraint = arena_.allocate<ast::ASTNode>();
-            new (constraint) ast::ASTNode(ast::NodeType::ColumnConstraint);
-            constraint->node_id = next_node_id_++;
-            constraint->primary_text = copy_to_arena("NOT_NULL");
+        // NOT must be followed by NULL. `NOT` alone previously consumed the
+        // keyword and returned null, so the caller's constraint loop broke and
+        // `a INT NOT` parsed cleanly (silent accept of a truncated constraint).
+        if (!current_token_ || current_token_->keyword_id != db25::Keyword::KW_NULL) {
+            error("expected NULL after NOT in a column constraint");
+            return nullptr;
         }
+        advance();
+        constraint = arena_.allocate<ast::ASTNode>();
+        new (constraint) ast::ASTNode(ast::NodeType::ColumnConstraint);
+        constraint->node_id = next_node_id_++;
+        constraint->primary_text = copy_to_arena("NOT_NULL");
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::PRIMARY) {
         advance();
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::KEY) {
-            advance();
-            constraint = arena_.allocate<ast::ASTNode>();
-            new (constraint) ast::ASTNode(ast::NodeType::PrimaryKeyConstraint);
-            constraint->node_id = next_node_id_++;
-            constraint->primary_text = copy_to_arena("PRIMARY_KEY");
+        // A column-level PRIMARY constraint must be PRIMARY KEY. `PRIMARY` alone
+        // previously consumed the keyword and returned null, so the caller's
+        // loop broke and `a INT PRIMARY` parsed cleanly (silent accept).
+        if (!current_token_ || current_token_->keyword_id != db25::Keyword::KEY) {
+            error("expected KEY after PRIMARY in a column constraint");
+            return nullptr;
         }
+        advance();
+        constraint = arena_.allocate<ast::ASTNode>();
+        new (constraint) ast::ASTNode(ast::NodeType::PrimaryKeyConstraint);
+        constraint->node_id = next_node_id_++;
+        constraint->primary_text = copy_to_arena("PRIMARY_KEY");
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::UNIQUE) {
         advance();
         constraint = arena_.allocate<ast::ASTNode>();
@@ -711,8 +730,13 @@ ast::ASTNode* Parser::parse_column_definition() {
     new (column) ast::ASTNode(ast::NodeType::ColumnDefinition);
     column->node_id = next_node_id_++;
     
-    // Get column name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+    // Get column name. Accept a bare keyword as a name too (`data`, `key`,
+    // `value`, ... are keywords but common column names) - the same
+    // keyword-as-identifier leniency the parser applies to table names. Table
+    // constraints (PRIMARY / FOREIGN / UNIQUE / CHECK / CONSTRAINT) are
+    // dispatched to parse_table_constraint by the caller before reaching here.
+    if (current_token_ && (current_token_->type == tokenizer::TokenType::Identifier ||
+                           current_token_->type == tokenizer::TokenType::Keyword)) {
         column->primary_text = copy_to_arena(current_token_->value);
         advance();
     } else {
@@ -945,16 +969,18 @@ ast::ASTNode* Parser::parse_create_table_impl() {
     }
     
     // Parse column definitions and constraints
+    bool had_column_parens = false;
     if (current_token_ && current_token_->value == "(") {
+        had_column_parens = true;
         advance(); // consume (
         parenthesis_depth_++;
-        
+
         ast::ASTNode* first_child = nullptr;
         ast::ASTNode* last_child = nullptr;
-        
+
         while (current_token_ && current_token_->value != ")") {
             ast::ASTNode* element = nullptr;
-            
+
             // Check if it's a table constraint or column definition
             if (current_token_ && (
                 current_token_->keyword_id == db25::Keyword::PRIMARY ||
@@ -968,36 +994,49 @@ ast::ASTNode* Parser::parse_create_table_impl() {
                 // Column definition
                 element = parse_column_definition();
             }
-            
-            if (element) {
-                element->parent = create_node;
-                if (!first_child) {
-                    first_child = element;
-                    create_node->first_child = first_child;
-                } else if (last_child) {
-                    last_child->next_sibling = element;
-                }
-                last_child = element;
-                create_node->child_count++;
+
+            // A column/constraint element that fails to parse is a syntax error;
+            // returning here (rather than looping) also guarantees progress.
+            if (!element) {
+                error("expected a column definition or table constraint in CREATE TABLE");
+                return nullptr;
             }
-            
-            // Check for comma
+            element->parent = create_node;
+            if (!first_child) {
+                first_child = element;
+                create_node->first_child = first_child;
+            } else if (last_child) {
+                last_child->next_sibling = element;
+            }
+            last_child = element;
+            create_node->child_count++;
+
+            // After an element only a comma (more elements) or ')' (end) is
+            // valid. An unexpected token here was previously SKIPPED by a
+            // recovery loop that silently swallowed invalid tokens -- and whole
+            // subsequent columns -- with a clean parse (`CREATE TABLE t (a INT
+            // %%% b INT)` kept only `a`). Reject instead.
             if (current_token_ && current_token_->value == ",") {
                 advance(); // consume comma
             } else if (current_token_ && current_token_->value != ")") {
-                // Unexpected token - skip to next comma or closing paren
-                while (current_token_ && 
-                       current_token_->value != "," && 
-                       current_token_->value != ")") {
-                    advance();
-                }
+                error("unexpected token in the CREATE TABLE column list");
+                return nullptr;
             }
         }
-        
+
         if (current_token_ && current_token_->value == ")") {
             advance(); // consume )
             parenthesis_depth_--;
         }
+    }
+
+    // An empty column list `CREATE TABLE t ()` (with no CTAS body to follow)
+    // defines a table with zero columns, which is invalid SQL. Reject it unless
+    // an AS <query> body follows (handled below), which supplies the columns.
+    if (had_column_parens && create_node->child_count == 0 &&
+        !(current_token_ && current_token_->keyword_id == db25::Keyword::AS)) {
+        error("expected at least one column or constraint in CREATE TABLE");
+        return nullptr;
     }
 
     // CREATE TABLE ... AS <query> (CTAS): the table is defined by the result of a
@@ -1026,14 +1065,13 @@ ast::ASTNode* Parser::parse_create_table_impl() {
         }
     }
 
-    // Parse table options (e.g., WITHOUT ROWID, engine options, etc.)
-    while (current_token_ &&
-           current_token_->type != tokenizer::TokenType::EndOfFile &&
-           current_token_->value != ";") {
-        // For now, just consume remaining tokens
-        // TODO: Parse specific table options
-        advance();
-    }
+    // Table options (WITHOUT ROWID, engine options, etc.) are not modeled yet.
+    // Previously a loop consumed EVERY remaining token to ';'/EOF, which
+    // silently swallowed arbitrary trailing junk -- even an entire following
+    // statement (`CREATE TABLE t (a INT) SELECT * FROM x`) -- and defeated the
+    // parser's trailing_token_count() diagnostic. Leave any unrecognized
+    // trailing tokens in place so they surface as trailing_token_count > 0,
+    // consistent with ALTER TABLE / DROP / CREATE INDEX.
 
     return create_node;
 }
