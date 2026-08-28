@@ -704,7 +704,16 @@ int Parser::get_precedence() const {
         // LIKE/BETWEEN/IN precede the comparison.) IS stays BELOW comparison (3),
         // which matches Postgres (`a = b IS NULL` -> `(a = b) IS NULL`).
         if (current_token_->keyword_id == db25::Keyword::BETWEEN) return 5;  // PREC_RANGE
-        if (current_token_->keyword_id == db25::Keyword::IN) return 5;  // PREC_RANGE
+        if (current_token_->keyword_id == db25::Keyword::IN) {
+            // Inside the first operand of POSITION(sub IN str), IN separates the
+            // two operands and is not the membership operator. Suppress it only
+            // at the operand's own paren depth (a real `IN (...)` nested deeper
+            // in that operand keeps working). See suppress_in_at_depth_.
+            if (suppress_in_at_depth_ >= 0 && parenthesis_depth_ == suppress_in_at_depth_) {
+                return 0;
+            }
+            return 5;  // PREC_RANGE
+        }
         if (current_token_->keyword_id == db25::Keyword::LIKE) return 5;  // PREC_RANGE
         if (current_token_->keyword_id == db25::Keyword::ILIKE) return 5;  // PREC_RANGE
         if (current_token_->keyword_id == db25::Keyword::IS) return 3;  // PREC_IS (for IS NULL)
