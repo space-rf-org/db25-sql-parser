@@ -19,7 +19,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { cxx: g++-13, build_type: Release }
           - { cxx: g++-14, build_type: Release }
           - { cxx: g++-14, build_type: Debug }
     steps:
