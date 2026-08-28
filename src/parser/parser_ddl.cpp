@@ -443,7 +443,53 @@ ast::ASTNode* Parser::parse_data_type() {
             type_node->primary_text = copy_to_arena(current_token_->value);
         }
         advance();
-        
+
+        // Multi-word SQL type names: consume the trailing type word(s) so the
+        // whole type forms one node. Previously the trailing word (`PRECISION`,
+        // `VARYING`, `WITH/WITHOUT TIME ZONE`) was left unconsumed for the
+        // caller -- tolerated because a recovery loop swallowed it, but now the
+        // strict CREATE TABLE column list rejects the leftover as an unexpected
+        // token, wrongly rejecting valid `f DOUBLE PRECISION` / `CHARACTER
+        // VARYING(n)` / `TIMESTAMP WITH TIME ZONE`.
+        //
+        // DOUBLE PRECISION -> DOUBLE.
+        if (keyword_id == db25::Keyword::DOUBLE && current_token_ &&
+            current_token_->keyword_id == db25::Keyword::PRECISION) {
+            type_node->primary_text = copy_to_arena("DOUBLE PRECISION");
+            advance();
+        }
+        // CHARACTER VARYING / CHAR VARYING -> VARCHAR.
+        else if (current_token_ &&
+                 current_token_->keyword_id == db25::Keyword::VARYING &&
+                 (keyword_id == db25::Keyword::CHARACTER ||
+                  keyword_id == db25::Keyword::CHAR)) {
+            type_node->data_type = ast::DataType::VarChar;
+            type_node->primary_text = copy_to_arena("VARCHAR");
+            advance();
+        }
+        // TIME / TIMESTAMP [WITH | WITHOUT] TIME ZONE. WITH is a keyword;
+        // WITHOUT is not, so match it case-insensitively.
+        if ((keyword_id == db25::Keyword::TIME ||
+             keyword_id == db25::Keyword::TIMESTAMP) &&
+            current_token_) {
+            const std::string_view v = current_token_->value;
+            const bool is_with = current_token_->keyword_id == db25::Keyword::WITH;
+            const bool is_without =
+                v.size() == 7 &&
+                (v == "WITHOUT" || v == "without" || v == "Without");
+            if (is_with || is_without) {
+                advance();  // WITH / WITHOUT
+                if (current_token_ &&
+                    current_token_->keyword_id == db25::Keyword::TIME) {
+                    advance();  // TIME
+                }
+                if (current_token_ &&
+                    current_token_->keyword_id == db25::Keyword::ZONE) {
+                    advance();  // ZONE
+                }
+            }
+        }
+
         // Parse precision/scale for numeric types
         if (current_token_ && current_token_->value == "(") {
             advance(); // consume (
