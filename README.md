@@ -20,11 +20,11 @@ A SIMD-optimized SQL parser with AST generation.
 
 ### Prerequisites
 
-- C++23 compatible compiler:
-  - Apple Clang 16.0+ (for deducing this support)
-  - GCC 13+
-  - Clang 16+
-  - MSVC 2022+ (v19.32+)
+- **GCC 14+** — the supported and CI-tested toolchain (Release + Debug, plus
+  AddressSanitizer/UBSan). This is the single baseline the project builds and
+  tests against.
+  - Other C++23 compilers (Clang 16+, Apple Clang 16+, MSVC 2022+) may work but
+    are **not exercised in CI** and are not currently supported.
 - CMake 3.20 or higher
 - SIMD support (SSE4.2 minimum, AVX2 recommended)
 
