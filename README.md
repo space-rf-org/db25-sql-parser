@@ -31,23 +31,23 @@ A SIMD-optimized SQL parser with AST generation.
 ### Build and Install
 
 ```bash
-# Clone the repository
-git clone https://github.com/space-rf-org/db25-sql-parser.git
+# Clone the repository WITH the SIMD tokenizer submodule (external/tokenizer)
+git clone --recursive https://github.com/space-rf-org/db25-sql-parser.git
 cd db25-sql-parser
+# (already cloned without --recursive? run: git submodule update --init --recursive)
 
-# Build (clean build from scratch)
-mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
+# Configure + build (tests and tools are ON by default)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 
-# Run tests
-make test
+# Run the full test suite
+ctest --test-dir build --output-on-failure
 
-# Generate visual AST dumps
-make generate_ast_dumps
+# Inspect a query's AST (tools land in build/ - see "AST Viewer" below)
+echo "SELECT id, name FROM users WHERE age > 18" | ./build/ast_viewer_enhanced
 
 # Install (optional)
-sudo make install
+sudo cmake --install build
 ```
 
 ### Basic Usage
@@ -74,17 +74,22 @@ int main() {
 
 ### AST Viewer
 
-Visualize SQL queries as syntax trees:
+Visualize SQL queries as syntax trees (`build/ast_viewer_enhanced`, built by default):
 
 ```bash
-# From command line
-echo "SELECT * FROM users" | ./ast_viewer
+# From stdin
+echo "SELECT * FROM users" | ./build/ast_viewer_enhanced
 
-# From file
-./ast_viewer --file tests/showcase_queries.sqls --index 1
+# From a .sqls file (queries separated by `---`), one query or all of them
+./build/ast_viewer_enhanced --file tests/showcase_queries.sqls --index 1
+./build/ast_viewer_enhanced --file tests/showcase_queries.sqls --all --stats
+```
 
-# With statistics
-./ast_viewer --stats --file queries.sqls --all
+For a **Graphviz** rendering of the AST (figures / docs), `build/ast_to_dot` emits DOT:
+
+```bash
+echo "SELECT name, RANK() OVER (PARTITION BY dept ORDER BY salary) FROM emp" \
+  | ./build/ast_to_dot | dot -Tsvg -o ast.svg
 ```
 
 <details>
@@ -157,8 +162,7 @@ Abstract Syntax Tree:
 
 - [User Manual](docs/USER_MANUAL.md) - Usage guide
 - [Developer Guide](docs/DEVELOPER_GUIDE.md) - Architecture and extension guide
-- [API Reference](docs/API_REFERENCE.md) - API documentation
-- [Examples](tests/showcase_queries.sqls) - SQL examples
+- [Examples](tests/showcase_queries.sqls) - SQL examples (drive them through `ast_viewer_enhanced`)
 
 ## Project Structure
 
@@ -179,13 +183,10 @@ db25-sql-parser/
 │   ├── test_*.cpp       # Unit tests
 │   └── test_all_queries.sh    # Batch testing script
 ├── tools/               # Tool source code
-│   └── ast_viewer.cpp   # AST visualization tool
-├── bin/                 # Compiled executables
-│   └── ast_viewer       # Ready-to-use tools
-├── scripts/             # Utility scripts
-│   └── test_all_queries.sh  # Batch testing (copy)
-├── docs/                # Documentation
-└── build/               # Build output (git-ignored)
+│   ├── ast_viewer_enhanced.cpp  # AST tree viewer (build/ast_viewer_enhanced)
+│   └── ast_to_dot.cpp           # Graphviz DOT emitter (build/ast_to_dot)
+├── docs/                # Documentation (USER_MANUAL, DEVELOPER_GUIDE)
+└── build/               # Build output, incl. the compiled tools (git-ignored)
 ```
 
 ## Building and Testing
@@ -193,42 +194,29 @@ db25-sql-parser/
 ### Clean Build from Scratch
 
 ```bash
-# Remove any existing build artifacts
-rm -rf build
+# Ensure the tokenizer submodule is present
+git submodule update --init --recursive
 
-# Create fresh build directory
-mkdir build && cd build
+# Configure (tests + tools ON by default) and build everything
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_TOOLS=ON
+cmake --build build -j
 
-# Configure with all features
-cmake -DCMAKE_BUILD_TYPE=Release \
-      -DBUILD_TESTS=ON \
-      -DBUILD_TOOLS=ON \
-      ..
+# Run all tests (authoritative; lists every case)
+ctest --test-dir build --output-on-failure
 
-# Build everything
-make -j$(nproc)
-
-# Run all tests
-make test
-
-# Or run tests individually
-./test_parser_basic
-./test_join_comprehensive
-./test_window_functions
-./test_cte
-
-# Generate AST dumps for visualization
-make generate_ast_dumps
-
-# View generated dumps
-ls /tmp/db25_ast_dumps/
+# Run one suite (or a name pattern) directly
+ctest --test-dir build -R test_parser_negative --output-on-failure
 ```
 
-### Debug Build
+### Sanitizer / Debug Build
+
+CI builds under AddressSanitizer + UBSan; reproduce locally with:
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON ..
-make -j$(nproc)
+cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
+      -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+cmake --build build-san -j && ctest --test-dir build-san --output-on-failure
 ```
 
 ## Contributing
