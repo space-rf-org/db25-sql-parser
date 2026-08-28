@@ -357,6 +357,15 @@ protected:
     [[nodiscard]] bool validate_select_stmt(ast::ASTNode* select_stmt);
     [[nodiscard]] bool validate_clause_dependencies(ast::ASTNode* select_stmt);
     [[nodiscard]] bool validate_join_clause(ast::ASTNode* join_clause);
+    // Structural backstop: recursively reject any node whose type structurally
+    // REQUIRES at least one child but was produced childless. This is the
+    // durable guard against the "silent-accept of a truncated statement" class
+    // (a parse function that attaches a required sub-node only `if (child)` and
+    // otherwise returns a childless node with a clean/trailing==0 parse). It
+    // catches future regressions in ANY parse function, not just the ones with
+    // an explicit inline guard.
+    [[nodiscard]] static bool node_requires_child(ast::NodeType type);
+    [[nodiscard]] bool validate_structural(const ast::ASTNode* node) const;
     
     // ========== Error Handling ==========
     

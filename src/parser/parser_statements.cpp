@@ -81,19 +81,24 @@ ast::ASTNode* Parser::parse_transaction_stmt() {
         // Check for TO SAVEPOINT
         if (current_token_ && current_token_->keyword_id == db25::Keyword::TO) {
             advance(); // consume TO
-            
+
             // Optional SAVEPOINT keyword
             if (current_token_ && current_token_->keyword_id == db25::Keyword::SAVEPOINT) {
                 advance(); // consume SAVEPOINT
             }
-            
-            // Parse savepoint name
-            if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-                rollback_node->primary_text = copy_to_arena(current_token_->value);
-                advance();
+
+            // Parse savepoint name (required once TO is present). `ROLLBACK TO`
+            // with no name was previously accepted with an empty target. A
+            // keyword is accepted as a name (parser-wide keyword-as-name leniency).
+            if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                                    current_token_->type != tokenizer::TokenType::Keyword)) {
+                error("expected a savepoint name after ROLLBACK TO");
+                return nullptr;
             }
+            rollback_node->primary_text = copy_to_arena(current_token_->value);
+            advance();
         }
-        
+
         return rollback_node;
         
     } else if (keyword_id == db25::Keyword::SAVEPOINT) {
@@ -103,13 +108,18 @@ ast::ASTNode* Parser::parse_transaction_stmt() {
         savepoint_node->node_id = next_node_id_++;
         
         advance(); // consume SAVEPOINT
-        
-        // Parse savepoint name
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-            savepoint_node->primary_text = copy_to_arena(current_token_->value);
-            advance();
+
+        // Parse savepoint name (required). `SAVEPOINT` with no name was
+        // previously accepted as a nameless SavepointStmt. A keyword is accepted
+        // as a name (parser-wide keyword-as-name leniency).
+        if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                                current_token_->type != tokenizer::TokenType::Keyword)) {
+            error("expected a savepoint name after SAVEPOINT");
+            return nullptr;
         }
-        
+        savepoint_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+
         return savepoint_node;
         
     } else if (keyword_id == db25::Keyword::RELEASE) {
@@ -124,13 +134,18 @@ ast::ASTNode* Parser::parse_transaction_stmt() {
         if (current_token_ && current_token_->keyword_id == db25::Keyword::SAVEPOINT) {
             advance(); // consume SAVEPOINT
         }
-        
-        // Parse savepoint name
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-            release_node->primary_text = copy_to_arena(current_token_->value);
-            advance();
+
+        // Parse savepoint name (required). `RELEASE` / `RELEASE SAVEPOINT` with
+        // no name was previously accepted as a nameless ReleaseSavepointStmt. A
+        // keyword is accepted as a name (parser-wide keyword-as-name leniency).
+        if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                                current_token_->type != tokenizer::TokenType::Keyword)) {
+            error("expected a savepoint name after RELEASE");
+            return nullptr;
         }
-        
+        release_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+
         return release_node;
     }
     
@@ -394,12 +409,15 @@ ast::ASTNode* Parser::parse_vacuum_stmt() {
         if (current_token_->keyword_id == db25::Keyword::INTO) {
             advance(); // consume INTO
             vacuum_node->semantic_flags |= 0x01; // INTO flag
-            
-            // Parse filename
-            if (current_token_ && current_token_->type == tokenizer::TokenType::String) {
-                vacuum_node->primary_text = copy_to_arena(current_token_->value);
-                advance();
+
+            // Parse filename (required after INTO). `VACUUM INTO` with no
+            // filename was previously accepted with an empty target.
+            if (!current_token_ || current_token_->type != tokenizer::TokenType::String) {
+                error("expected a filename string after VACUUM INTO");
+                return nullptr;
             }
+            vacuum_node->primary_text = copy_to_arena(current_token_->value);
+            advance();
         } else if (current_token_->type == tokenizer::TokenType::Identifier) {
             // Schema name
             vacuum_node->primary_text = copy_to_arena(current_token_->value);
@@ -546,12 +564,19 @@ ast::ASTNode* Parser::parse_pragma_stmt() {
     pragma_node->node_id = next_node_id_++;
     
     advance(); // consume PRAGMA
-    
-    // Parse [schema.]pragma_name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+
+    // Parse [schema.]pragma_name (required). `PRAGMA` with no name was
+    // previously accepted as a nameless PragmaStmt. A keyword is accepted as a
+    // name (parser-wide keyword-as-name leniency; many pragma names are keywords).
+    if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                            current_token_->type != tokenizer::TokenType::Keyword)) {
+        error("expected a pragma name after PRAGMA");
+        return nullptr;
+    }
+    {
         auto first_name = current_token_->value;
         advance();
-        
+
         if (current_token_ && current_token_->value == ".") {
             advance(); // consume .
             if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
@@ -562,34 +587,42 @@ ast::ASTNode* Parser::parse_pragma_stmt() {
         } else {
             pragma_node->primary_text = copy_to_arena(first_name);
         }
-        
-        // Parse optional value
+
+        // Parse optional value. When the `=` or `(` value syntax is present a
+        // value is required; `PRAGMA foo =` / `PRAGMA foo (` with no value were
+        // previously accepted with an empty (childless) pragma.
         if (current_token_) {
             if (current_token_->value == "=") {
                 advance(); // consume =
                 auto* value = parse_expression(0);
-                if (value) {
-                    value->parent = pragma_node;
-                    pragma_node->first_child = value;
-                    pragma_node->child_count = 1;
+                if (!value) {
+                    error("expected a value after '=' in PRAGMA");
+                    return nullptr;
                 }
+                value->parent = pragma_node;
+                pragma_node->first_child = value;
+                pragma_node->child_count = 1;
             } else if (current_token_->value == "(") {
                 advance(); // consume (
                 parenthesis_depth_++;
                 auto* value = parse_expression(0);
-                if (value) {
-                    value->parent = pragma_node;
-                    pragma_node->first_child = value;
-                    pragma_node->child_count = 1;
+                if (!value) {
+                    error("expected a value after '(' in PRAGMA");
+                    return nullptr;
                 }
-                if (current_token_ && current_token_->value == ")") {
-                    advance(); // consume )
-                    if (parenthesis_depth_ > 0) parenthesis_depth_--;
+                value->parent = pragma_node;
+                pragma_node->first_child = value;
+                pragma_node->child_count = 1;
+                if (!current_token_ || current_token_->value != ")") {
+                    error("expected ')' after the PRAGMA value");
+                    return nullptr;
                 }
+                advance(); // consume )
+                if (parenthesis_depth_ > 0) parenthesis_depth_--;
             }
         }
     }
-    
+
     return pragma_node;
 }
 

@@ -195,28 +195,41 @@ ast::ASTNode* Parser::parse_create_index_impl() {
         }
     }
     
-    // Get index name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        create_node->primary_text = copy_to_arena(current_token_->value);
-        advance();
+    // Get index name (required). Without this guard `CREATE INDEX` /
+    // `CREATE UNIQUE INDEX` produced a childless CreateIndexStmt (trailing==0).
+    // A keyword is accepted as a name (parser-wide keyword-as-name leniency).
+    if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                            current_token_->type != tokenizer::TokenType::Keyword)) {
+        error("expected an index name after CREATE INDEX");
+        return nullptr;
     }
-    
-    // Expect ON keyword
-    if (current_token_ && current_token_->keyword_id == db25::Keyword::ON) {
-        advance();
-        
-        // Get table name
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-            create_node->schema_name = copy_to_arena(current_token_->value);  // Use schema_name for table
-            advance();
-        }
+    create_node->primary_text = copy_to_arena(current_token_->value);
+    advance();
+
+    // ON <table> is required. `CREATE INDEX i` and `CREATE INDEX i ON` (no
+    // table) were both accepted as index nodes with no table and no columns.
+    if (!current_token_ || current_token_->keyword_id != db25::Keyword::ON) {
+        error("expected ON <table> in CREATE INDEX");
+        return nullptr;
     }
-    
+    advance();
+    if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                            current_token_->type != tokenizer::TokenType::Keyword)) {
+        error("expected a table name after ON in CREATE INDEX");
+        return nullptr;
+    }
+    create_node->schema_name = copy_to_arena(current_token_->value);  // Use schema_name for table
+    advance();
+
     // Parse the indexed column list, attaching each column as an Identifier
-    // child of the CREATE INDEX node.
-    if (current_token_ && current_token_->value == "(") {
-        parse_paren_identifier_list(create_node);
+    // child of the CREATE INDEX node. A '(' column list is required (expression
+    // indexes are not modeled yet); `CREATE INDEX i ON t` with no list defines
+    // no key and was previously accepted.
+    if (!current_token_ || current_token_->value != "(") {
+        error("expected '(' with an indexed column list in CREATE INDEX");
+        return nullptr;
     }
+    parse_paren_identifier_list(create_node);
 
     return create_node;
 }
@@ -241,12 +254,17 @@ ast::ASTNode* Parser::parse_create_view_impl() {
     new (create_node) ast::ASTNode(ast::NodeType::CreateViewStmt);
     create_node->node_id = next_node_id_++;
     
-    // Get view name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        create_node->primary_text = copy_to_arena(current_token_->value);
-        advance();
+    // Get view name (required). `CREATE VIEW` / `CREATE VIEW v` (no AS body)
+    // previously produced a childless CreateViewStmt with a clean parse.
+    // A keyword is accepted as a name (parser-wide keyword-as-name leniency).
+    if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                            current_token_->type != tokenizer::TokenType::Keyword)) {
+        error("expected a view name after CREATE VIEW");
+        return nullptr;
     }
-    
+    create_node->primary_text = copy_to_arena(current_token_->value);
+    advance();
+
     // Optional column list
     if (current_token_ && current_token_->value == "(") {
         // Skip column list for now
@@ -258,23 +276,28 @@ ast::ASTNode* Parser::parse_create_view_impl() {
             advance();
         }
     }
-    
-    // Expect AS keyword
-    if (current_token_ && current_token_->keyword_id == db25::Keyword::AS) {
-        advance();
 
-        // The view body is any query expression - SELECT, a set operation, WITH,
-        // or a VALUES list (`CREATE VIEW v AS VALUES (1),(2)` /
-        // `... AS VALUES (1) UNION SELECT 2`). Dispatch through the shared
-        // query-body parser; previously only a leading SELECT was accepted, so a
-        // VALUES body was silently dropped (the view had no query child).
-        create_node->first_child = parse_query_body();
-        if (create_node->first_child) {
-            create_node->first_child->parent = create_node;
-            create_node->child_count = 1;
-        }
+    // AS <query> is required: a view is defined by its query. `CREATE VIEW v`
+    // with no AS body, and `CREATE VIEW v AS` with no query, are both truncated.
+    if (!current_token_ || current_token_->keyword_id != db25::Keyword::AS) {
+        error("expected AS <query> in CREATE VIEW");
+        return nullptr;
     }
-    
+    advance();
+
+    // The view body is any query expression - SELECT, a set operation, WITH,
+    // or a VALUES list (`CREATE VIEW v AS VALUES (1),(2)` /
+    // `... AS VALUES (1) UNION SELECT 2`). Dispatch through the shared
+    // query-body parser; previously only a leading SELECT was accepted, so a
+    // VALUES body was silently dropped (the view had no query child).
+    create_node->first_child = parse_query_body();
+    if (!create_node->first_child) {
+        error("expected a query after AS in CREATE VIEW");
+        return nullptr;
+    }
+    create_node->first_child->parent = create_node;
+    create_node->child_count = 1;
+
     return create_node;
 }
 
@@ -1115,11 +1138,21 @@ ast::ASTNode* Parser::parse_create_table_impl() {
         }
     }
     
-    // Get table name (potentially schema-qualified)
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+    // Get table name (potentially schema-qualified). A table name is REQUIRED;
+    // without this guard `CREATE TABLE` / `CREATE TABLE (a INT)` produced a
+    // CreateTableStmt with an empty primary_text and a clean (trailing==0) parse.
+    // A keyword is accepted as a name (`data`, `key`, ... are common table names
+    // that tokenize as keywords) - the same leniency parse_column_definition
+    // applies to column names.
+    if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                            current_token_->type != tokenizer::TokenType::Keyword)) {
+        error("expected a table name after CREATE TABLE");
+        return nullptr;
+    }
+    {
         std::string_view first_name = current_token_->value;
         advance();
-        
+
         if (current_token_ && current_token_->value == ".") {
             advance(); // consume dot
             if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
@@ -1227,6 +1260,15 @@ ast::ASTNode* Parser::parse_create_table_impl() {
             }
             create_node->child_count++;
         }
+    }
+
+    // A CREATE TABLE must define its shape: either a parenthesized
+    // column/constraint list or an AS <query> body. `CREATE TABLE t` with
+    // neither is a truncated statement -- previously accepted as a childless
+    // CreateTableStmt with trailing==0.
+    if (!had_column_parens && create_node->child_count == 0) {
+        error("expected a column list or AS query after the table name in CREATE TABLE");
+        return nullptr;
     }
 
     // Table options (WITHOUT ROWID, engine options, etc.) are not modeled yet.
@@ -1710,12 +1752,17 @@ ast::ASTNode* Parser::parse_create_trigger() {
         }
     }
     
-    // Get trigger name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        trigger_node->primary_text = copy_to_arena(current_token_->value);
-        advance();
+    // Get trigger name (required). `CREATE TRIGGER` / `CREATE TRIGGER tg` were
+    // previously accepted as a CreateTriggerStmt with no name / no event / no
+    // ON table / no body. A keyword is accepted as a name (parser-wide leniency).
+    if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                            current_token_->type != tokenizer::TokenType::Keyword)) {
+        error("expected a trigger name after CREATE TRIGGER");
+        return nullptr;
     }
-    
+    trigger_node->primary_text = copy_to_arena(current_token_->value);
+    advance();
+
     // Parse BEFORE/AFTER/INSTEAD OF
     if (current_token_ && current_token_->keyword_id == db25::Keyword::BEFORE) {
         trigger_node->semantic_flags |= 0x10;  // BEFORE flag
@@ -1752,14 +1799,19 @@ ast::ASTNode* Parser::parse_create_trigger() {
         }
     }
     
-    // Parse ON table_name
-    if (current_token_ && current_token_->keyword_id == db25::Keyword::ON) {
-        advance();
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-            trigger_node->schema_name = copy_to_arena(current_token_->value); // Using schema_name for table
-            advance();
-        }
+    // Parse ON table_name (required: a trigger must be attached to a table).
+    if (!current_token_ || current_token_->keyword_id != db25::Keyword::ON) {
+        error("expected ON <table> in CREATE TRIGGER");
+        return nullptr;
     }
+    advance();
+    if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                            current_token_->type != tokenizer::TokenType::Keyword)) {
+        error("expected a table name after ON in CREATE TRIGGER");
+        return nullptr;
+    }
+    trigger_node->schema_name = copy_to_arena(current_token_->value); // Using schema_name for table
+    advance();
     
     // Parse FOR EACH ROW/STATEMENT
     if (current_token_ && current_token_->keyword_id == db25::Keyword::FOR) {
@@ -1787,7 +1839,10 @@ ast::ASTNode* Parser::parse_create_trigger() {
         }
     }
     
-    // Parse trigger body (BEGIN ... END or single statement)
+    // Parse trigger body (BEGIN ... END or single statement). A trigger with no
+    // body is a truncated statement; record the child count so we can require
+    // the body added at least one statement.
+    const size_t children_before_body = trigger_node->child_count;
     if (current_token_ && current_token_->keyword_id == db25::Keyword::BEGIN) {
         advance();
         // Parse multiple statements until END
@@ -1850,7 +1905,14 @@ ast::ASTNode* Parser::parse_create_trigger() {
             trigger_node->child_count++;
         }
     }
-    
+
+    // The body must contribute at least one statement; `CREATE TRIGGER ... ON t`
+    // with no BEGIN/END block and no single statement was previously accepted.
+    if (trigger_node->child_count == children_before_body) {
+        error("expected a trigger body (BEGIN ... END or a single statement)");
+        return nullptr;
+    }
+
     return trigger_node;
 }
 
@@ -1885,21 +1947,34 @@ ast::ASTNode* Parser::parse_create_schema() {
         }
     }
     
-    // Get schema name
+    // Get schema name. A schema name is required unless an AUTHORIZATION clause
+    // supplies the owner (`CREATE SCHEMA AUTHORIZATION owner`). `CREATE SCHEMA`
+    // with neither was previously accepted as a nameless CreateSchemaStmt.
     if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
         schema_node->primary_text = copy_to_arena(current_token_->value);
         advance();
+    } else if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+               current_token_->keyword_id != db25::Keyword::AUTHORIZATION) {
+        // A keyword schema name (parser-wide keyword-as-name leniency).
+        schema_node->primary_text = copy_to_arena(current_token_->value);
+        advance();
+    } else if (!current_token_ || current_token_->keyword_id != db25::Keyword::AUTHORIZATION) {
+        error("expected a schema name after CREATE SCHEMA");
+        return nullptr;
     }
-    
+
     // Optional AUTHORIZATION clause
     if (current_token_ && current_token_->keyword_id == db25::Keyword::AUTHORIZATION) {
         advance();
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-            schema_node->schema_name = copy_to_arena(current_token_->value); // Store owner in schema_name
-            advance();
+        if (!current_token_ || (current_token_->type != tokenizer::TokenType::Identifier &&
+                                current_token_->type != tokenizer::TokenType::Keyword)) {
+            error("expected an owner name after AUTHORIZATION in CREATE SCHEMA");
+            return nullptr;
         }
+        schema_node->schema_name = copy_to_arena(current_token_->value); // Store owner in schema_name
+        advance();
     }
-    
+
     return schema_node;
 }
 
