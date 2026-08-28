@@ -260,16 +260,17 @@ TEST(ParserNegativeTest, ValidArrayConstructorsStillParse) {
 // More break-on-null recovery loops that silently truncated a statement while
 // parse() returned success, none caught by the has_error_ backstop (they never
 // called error()) nor the paren-balance check:
-//   - a comma-separated FROM item that fails to parse (an unsupported form the
-//     FROM parser emits no node for, e.g. comma-form LATERAL) was dropped and
-//     the tail left as trailing tokens;
+//   - a comma-separated FROM item that fails to parse (a keyword where a table
+//     reference is required, or a trailing comma at end of input) was dropped
+//     and the tail left as trailing tokens;
 //   - a set operator (UNION/INTERSECT/EXCEPT) whose right query fails to parse
 //     was erased, yielding the bare left arm;
 //   - an UPDATE ... SET assignment with a missing value after `=` emitted a
 //     value-less assignment node.
 TEST(ParserNegativeTest, SilentlyTruncatedFromSetopUpdateRejected) {
-    // FROM item after a comma.
-    expect_parse_error("SELECT * FROM users u, LATERAL (SELECT 1) l");
+    // FROM item after a comma. (Comma-form LATERAL `FROM a, LATERAL (subq) l` is
+    // now a supported derived-table join - see test_lateral_joins - so it is no
+    // longer in this list; a bare keyword or end-of-input still truncates.)
     expect_parse_error("SELECT * FROM a, WHERE x");
     expect_parse_error("SELECT * FROM a,");
     // Set-operator right-hand side (UNION / INTERSECT / EXCEPT, incl. chains).

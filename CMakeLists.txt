@@ -253,6 +253,9 @@ if(BUILD_TESTS)
     # SUBSTRING(s FROM a FOR b), TRIM([spec] [chars] FROM s).
     add_parser_test(test_string_keyword_functions tests/test_string_keyword_functions.cpp)
 
+    # LATERAL joins: comma form, CROSS/INNER JOIN LATERAL, outer-lateral rejection.
+    add_parser_test(test_lateral_joins tests/test_lateral_joins.cpp)
+
     # Add custom target for generating visual dumps
     add_custom_target(generate_ast_dumps
         COMMAND test_ast_dump --save --verbose

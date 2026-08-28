@@ -1088,6 +1088,36 @@ ast::ASTNode* Parser::parse_from_clause() {
             current_token_->value == ",") {
             advance(); // consume comma
 
+            // Comma-form LATERAL: `FROM a, LATERAL (subquery) alias` is a CROSS
+            // JOIN LATERAL - the right derived table is evaluated per left row and
+            // may reference the preceding FROM items. Represent it as a LateralJoin
+            // node (the analyzer and binder key laterality off this node type)
+            // whose single child is the derived table, spliced in as the join that
+            // extends the current table_reference group.
+            if (current_token_ &&
+                current_token_->type == tokenizer::TokenType::Keyword &&
+                current_token_->keyword_id == db25::Keyword::LATERAL) {
+                advance(); // consume LATERAL
+                auto* rhs = parse_table_reference();
+                if (!rhs) {
+                    error("expected a subquery after LATERAL in the FROM clause");
+                    break;
+                }
+                auto* lateral_join = arena_.allocate<ast::ASTNode>();
+                new (lateral_join) ast::ASTNode(ast::NodeType::LateralJoin);
+                lateral_join->node_id = next_node_id_++;
+                lateral_join->semantic_flags |=
+                    static_cast<uint16_t>(ast::NodeFlags::IsLateral);
+                rhs->parent = lateral_join;
+                lateral_join->first_child = rhs;
+                lateral_join->child_count = 1;
+                lateral_join->parent = from_node;
+                last_child->next_sibling = lateral_join;
+                last_child = lateral_join;
+                from_node->child_count++;
+                continue;
+            }
+
             auto* next_table = parse_table_reference();
             if (!next_table) {
                 // A comma promises another table reference. A null here means the
@@ -1155,6 +1185,11 @@ ast::ASTNode* Parser::parse_join_clause() {
     // every other qualified join requires one.
     bool is_natural = false;
     bool is_cross = false;
+    // An outer join (LEFT / RIGHT / FULL) null-extends a side. Tracked so a
+    // `LEFT JOIN LATERAL` etc. can be rejected: the LateralJoin node type does
+    // not yet carry outer-join nullability, so accepting it would silently drop
+    // the null-extension.
+    bool is_outer = false;
 
     // Optional NATURAL prefix: NATURAL [INNER | LEFT [OUTER] | RIGHT [OUTER] |
     // FULL [OUTER]] JOIN. A NATURAL join carries no ON / USING clause; its join
@@ -1177,6 +1212,11 @@ ast::ASTNode* Parser::parse_join_clause() {
             kw == "CROSS" || kw == "cross") {
             if (kw == "CROSS" || kw == "cross") {
                 is_cross = true;
+            }
+            if (kw == "LEFT" || kw == "left" ||
+                kw == "RIGHT" || kw == "right" ||
+                kw == "FULL" || kw == "full") {
+                is_outer = true;
             }
             if (!join_type.empty()) {
                 join_type += " ";
@@ -1207,7 +1247,26 @@ ast::ASTNode* Parser::parse_join_clause() {
     if (!join_type.empty()) {
         join_node->primary_text = copy_to_arena(join_type);
     }
-    
+
+    // LATERAL modifier: `[INNER] JOIN LATERAL (subquery) alias` /
+    // `CROSS JOIN LATERAL (subquery) alias`. The right derived table is evaluated
+    // per left row and may reference the left input's columns. Record it as a
+    // LateralJoin node so the analyzer grants the RHS sibling visibility and the
+    // binder resolves the correlation. NATURAL and outer (LEFT/RIGHT/FULL) joins
+    // additionally merge or null-extend a side; the LateralJoin node does not
+    // model that yet, so reject those combinations rather than silently drop it.
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+        current_token_->keyword_id == db25::Keyword::LATERAL) {
+        if (is_outer || is_natural) {
+            error("LATERAL is only supported with [INNER] JOIN and CROSS JOIN");
+            return join_node;
+        }
+        advance();  // consume LATERAL
+        join_node->node_type = ast::NodeType::LateralJoin;
+        join_node->semantic_flags |=
+            static_cast<uint16_t>(ast::NodeFlags::IsLateral);
+    }
+
     // Parse the joined table
     auto* table = parse_table_reference();
     if (table) {
