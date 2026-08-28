@@ -315,12 +315,15 @@ ast::ASTNode* Parser::parse_drop_stmt() {
         }
     }
     
-    // Get object name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        drop_node->primary_text = copy_to_arena(current_token_->value);
-        advance();
+    // Get object name (mandatory): `DROP TABLE` with no name previously
+    // produced a DropStmt with an empty object name.
+    if (!current_token_ || current_token_->type != tokenizer::TokenType::Identifier) {
+        error("expected an object name in DROP");
+        return nullptr;
     }
-    
+    drop_node->primary_text = copy_to_arena(current_token_->value);
+    advance();
+
     // Handle CASCADE/RESTRICT
     if (current_token_ && current_token_->keyword_id == db25::Keyword::CASCADE) {
         drop_node->semantic_flags |= 0x04;  // CASCADE flag
@@ -350,12 +353,15 @@ ast::ASTNode* Parser::parse_truncate_stmt() {
     new (truncate_node) ast::ASTNode(ast::NodeType::TruncateStmt);
     truncate_node->node_id = next_node_id_++;
     
-    // Get table name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        truncate_node->primary_text = copy_to_arena(current_token_->value);
-        advance();
+    // Get table name (mandatory): `TRUNCATE` / `TRUNCATE TABLE` with no name
+    // previously produced a TruncateStmt with an empty table name.
+    if (!current_token_ || current_token_->type != tokenizer::TokenType::Identifier) {
+        error("expected a table name in TRUNCATE");
+        return nullptr;
     }
-    
+    truncate_node->primary_text = copy_to_arena(current_token_->value);
+    advance();
+
     // Handle CASCADE/RESTRICT (PostgreSQL)
     if (current_token_ && current_token_->keyword_id == db25::Keyword::CASCADE) {
         truncate_node->semantic_flags |= 0x04;  // CASCADE flag
@@ -364,7 +370,7 @@ ast::ASTNode* Parser::parse_truncate_stmt() {
         truncate_node->semantic_flags |= 0x08;  // RESTRICT flag
         advance();
     }
-    
+
     return truncate_node;
 }
 
@@ -536,30 +542,36 @@ ast::ASTNode* Parser::parse_column_constraint() {
         new (constraint) ast::ASTNode(ast::NodeType::CheckConstraint);
         constraint->node_id = next_node_id_++;
         
-        if (current_token_ && current_token_->value == "(") {
-            advance(); // consume (
-            parenthesis_depth_++;
+        // CHECK requires a parenthesized condition; `CHECK` alone previously
+        // produced a childless CheckConstraint and a clean parse.
+        if (!current_token_ || current_token_->value != "(") {
+            error("expected '(' with a condition after CHECK");
+            return nullptr;
+        }
+        advance(); // consume (
+        parenthesis_depth_++;
 
-            // Capture the exact source text of the check expression: both tokens
-            // view into the same source buffer, so the span runs from the first
-            // expression token to the closing paren. Stored on primary_text for
-            // faithful persistence downstream (no lossy AST reconstruction).
-            const char* expr_begin = current_token_ ? current_token_->value.data() : nullptr;
-            auto* expr = parse_expression(0);
-            if (expr) {
-                expr->parent = constraint;
-                constraint->first_child = expr;
-                constraint->child_count = 1;
-            }
-            const std::string_view text = expr_source_span(tokenizer_, expr_begin);
-            if (!text.empty()) {
-                constraint->primary_text = copy_to_arena(text);
-            }
+        // Capture the exact source text of the check expression: both tokens
+        // view into the same source buffer, so the span runs from the first
+        // expression token to the closing paren. Stored on primary_text for
+        // faithful persistence downstream (no lossy AST reconstruction).
+        const char* expr_begin = current_token_ ? current_token_->value.data() : nullptr;
+        auto* expr = parse_expression(0);
+        if (!expr) {
+            error("expected a condition in the CHECK constraint");
+            return nullptr;
+        }
+        expr->parent = constraint;
+        constraint->first_child = expr;
+        constraint->child_count = 1;
+        const std::string_view text = expr_source_span(tokenizer_, expr_begin);
+        if (!text.empty()) {
+            constraint->primary_text = copy_to_arena(text);
+        }
 
-            if (current_token_ && current_token_->value == ")") {
-                advance(); // consume )
-                parenthesis_depth_--;
-            }
+        if (current_token_ && current_token_->value == ")") {
+            advance(); // consume )
+            parenthesis_depth_--;
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_DEFAULT) {
         advance();
@@ -569,14 +581,18 @@ ast::ASTNode* Parser::parse_column_constraint() {
 
         // Capture the default expression's source text (see CHECK above). The
         // span runs from the first token to whatever follows the default (a
-        // comma, another constraint keyword, or the closing paren).
+        // comma, another constraint keyword, or the closing paren). DEFAULT
+        // requires a value expression; `DEFAULT` alone previously produced a
+        // childless DefaultClause.
         const char* expr_begin = current_token_ ? current_token_->value.data() : nullptr;
         auto* expr = parse_primary_expression();
-        if (expr) {
-            expr->parent = constraint;
-            constraint->first_child = expr;
-            constraint->child_count = 1;
+        if (!expr) {
+            error("expected a value expression after DEFAULT");
+            return nullptr;
         }
+        expr->parent = constraint;
+        constraint->first_child = expr;
+        constraint->child_count = 1;
         const std::string_view text = expr_source_span(tokenizer_, expr_begin);
         if (!text.empty()) {
             constraint->primary_text = copy_to_arena(text);
@@ -587,9 +603,14 @@ ast::ASTNode* Parser::parse_column_constraint() {
         constraint = arena_.allocate<ast::ASTNode>();
         new (constraint) ast::ASTNode(ast::NodeType::ForeignKeyConstraint);
         constraint->node_id = next_node_id_++;
-        
-        // Parse referenced table
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+
+        // REFERENCES requires a referenced table name; `REFERENCES` alone
+        // previously produced a ForeignKeyConstraint with no target.
+        if (!current_token_ || current_token_->type != tokenizer::TokenType::Identifier) {
+            error("expected a referenced table name after REFERENCES");
+            return nullptr;
+        }
+        {
             constraint->primary_text = copy_to_arena(current_token_->value);
             advance();
             
