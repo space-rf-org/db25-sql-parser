@@ -712,6 +712,15 @@ TEST(ParserNegativeTest, CreateTableValidFormsStillParse) {
         {"CREATE TABLE t (a INT PRIMARY KEY, b TEXT NOT NULL, c INT UNIQUE)"},
         {"CREATE TABLE t (a INT CHECK (a > 0))"},
         {"CREATE TABLE t AS SELECT * FROM x"},
+        // Multi-word SQL type names: the strict column-list check must not trip
+        // on the trailing type word(s) (regression guard for DOUBLE PRECISION
+        // etc. being rejected once the recovery loop was removed).
+        {"CREATE TABLE t (f DOUBLE PRECISION)"},
+        {"CREATE TABLE t (a CHARACTER VARYING(20))"},
+        {"CREATE TABLE t (a TIMESTAMP WITH TIME ZONE)"},
+        {"CREATE TABLE t (a TIMESTAMP WITHOUT TIME ZONE)"},
+        {"CREATE TABLE t (a DOUBLE PRECISION, b CHARACTER VARYING(20), "
+         "c TIMESTAMP WITH TIME ZONE)"},
     };
     for (const auto& c : ok) {
         auto r = parser.parse(c.sql);
