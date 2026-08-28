@@ -966,6 +966,14 @@ TEST(ParserNegativeTest, DanglingWhereInDmlRejected) {
     expect_parse_error("UPDATE t SET a = 1 WHERE");    // no condition
 }
 
+// GROUP BY with no grouping element is a truncated statement (the empty
+// grouping set `GROUP BY ()` is separately valid - see test_group_by).
+TEST(ParserNegativeTest, TruncatedGroupByRejected) {
+    expect_parse_error("SELECT x FROM t GROUP BY");                  // nothing after
+    expect_parse_error("SELECT x FROM t GROUP BY HAVING COUNT(*)>0");// clause, no key
+    expect_parse_error("SELECT x FROM t GROUP BY ,");                // dangling comma
+}
+
 // ON CONFLICT DO must be NOTHING or UPDATE; DO UPDATE requires a SET clause.
 TEST(ParserNegativeTest, TruncatedOnConflictActionRejected) {
     expect_parse_error("INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO");
