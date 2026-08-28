@@ -387,12 +387,21 @@ protected:
     
     int parenthesis_depth_ = 0;  // Track parenthesis balance
     bool strict_mode_ = true;    // Enable strict validation
-    // When >= 0, the keyword IN is NOT treated as a binary operator while
-    // parenthesis_depth_ equals this value. Used to parse the first operand of
-    // POSITION(sub IN str), whose `IN` separates the two operands rather than
-    // being the membership operator. Depth-scoped so a genuine `IN (...)` nested
-    // one level deeper inside that operand is unaffected. See get_precedence().
-    int suppress_in_at_depth_ = -1;
+    // One-shot: armed by parse_string_keyword_call() just before it parses the
+    // first operand of POSITION(sub IN str), and consumed at the very next
+    // parse_expression() entry. For that one invocation, the operand's OWN
+    // top-level `IN` is not the membership operator - it is POSITION's argument
+    // separator, so get_precedence() returns 0 for it and the Pratt loop stops.
+    // A membership `IN` inside any nested sub-expression (a parenthesized group,
+    // a CASE branch, a function argument) is UNAFFECTED: the nested
+    // parse_expression() consumes and clears this flag on entry, so its own IN
+    // parses normally. Scoping is by Pratt level, not parenthesis depth (a CASE
+    // WHEN condition sits at the same paren depth but must keep its IN).
+    bool arm_top_in_suppression_ = false;
+    // Transient: set true only for the single get_precedence() call in the
+    // arming invocation's operator loop, so IN is suppressed at exactly the
+    // operand's top Pratt level and nowhere else. See get_precedence().
+    bool in_op_suppresses_in_ = false;
     // True while parsing the right-hand branch of a set operation. It tells
     // parse_select_stmt to return the bare branch instead of consuming the
     // following set operators itself, so the caller's loop can fold them

@@ -168,6 +168,15 @@ TEST(StringKeywordFunctions, GenuineInMembershipUnaffected) {
     EXPECT_NE(parse_ok(p, "SELECT POSITION((CASE WHEN x IN (1,2) THEN 'a' ELSE 'b' END) "
                           "IN s) FROM t"),
               nullptr);
+    // Regression: a membership IN inside a sub-construct that does NOT add
+    // parenthesis depth (a bare CASE WHEN condition, a function argument) must
+    // still parse as membership - only POSITION's own top-level IN is the
+    // separator. The suppression is scoped to the operand's top Pratt level, not
+    // to parenthesis depth, so these forms (which have no extra parens) parse.
+    EXPECT_NE(parse_ok(p, "SELECT POSITION(CASE WHEN a IN (1,2) THEN 'x' ELSE 'y' END "
+                          "IN s) FROM t"),
+              nullptr);
+    EXPECT_NE(parse_ok(p, "SELECT POSITION(COALESCE(x, 'a') IN s) FROM t"), nullptr);
 }
 
 // -------- malformed keyword forms are rejected cleanly ----------------------
