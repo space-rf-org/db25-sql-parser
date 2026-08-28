@@ -193,7 +193,15 @@ ast::ASTNode* Parser::parse_insert_stmt() {
                     advance();
                     parenthesis_depth_--;
                 }
-                
+
+                // A row value constructor requires at least one value; an empty
+                // row `VALUES ()` previously appended a childless row node with a
+                // clean parse (the inner loop simply never iterated).
+                if (value_set->child_count == 0) {
+                    error("expected at least one value in the VALUES row");
+                    return nullptr;
+                }
+
                 value_set->parent = values_node;
                 if (!first_value_set) {
                     first_value_set = value_set;

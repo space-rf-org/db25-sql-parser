@@ -278,6 +278,12 @@ protected:
     [[nodiscard]] ast::ASTNode* parse_column_definition();
     [[nodiscard]] ast::ASTNode* parse_column_constraint();
     [[nodiscard]] ast::ASTNode* parse_table_constraint();
+    // Consume the optional referential-action / characteristic tail of a
+    // FOREIGN KEY REFERENCES clause (MATCH ..., ON DELETE/UPDATE <action>,
+    // [NOT] DEFERRABLE, INITIALLY ...), recording ON DELETE/UPDATE actions and
+    // deferral into `constraint`'s semantic_flags. Returns false (with error()
+    // already called) on a malformed clause such as `ON <not-delete/update>`.
+    [[nodiscard]] bool consume_fk_referential_actions(ast::ASTNode* constraint);
     // Parse a parenthesized identifier list "( a, b, ... )" and attach each name
     // as an Identifier child of `parent`. Returns the number of names consumed.
     int parse_paren_identifier_list(ast::ASTNode* parent);

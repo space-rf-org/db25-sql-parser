@@ -731,3 +731,110 @@ TEST(ParserNegativeTest, CreateTableValidFormsStillParse) {
         }
     }
 }
+
+// --- ALTER TABLE truncated actions (pass-30 audit) --------------------------
+// ALTER TABLE built childless action stubs with trailing==0 on incomplete
+// input (the action cascade had no final else and each branch silently no-oped
+// on a missing operand). Each truncated form must now be a syntax error.
+TEST(ParserNegativeTest, AlterTableTruncatedActionsRejected) {
+    expect_parse_error("ALTER TABLE t");                  // no action keyword
+    expect_parse_error("ALTER TABLE t ADD");              // ADD, no column/constraint
+    expect_parse_error("ALTER TABLE t DROP");             // DROP, no column
+    expect_parse_error("ALTER TABLE t ALTER");            // ALTER, no column
+    expect_parse_error("ALTER TABLE t RENAME");           // RENAME, no operand
+    expect_parse_error("ALTER TABLE t DROP CONSTRAINT");  // no constraint name
+    expect_parse_error("ALTER TABLE");                    // no table name
+}
+
+// Guard: valid ALTER TABLE forms still parse cleanly (no over-rejection).
+TEST(ParserNegativeTest, AlterTableValidFormsStillParse) {
+    Parser parser;
+    const char* ok[] = {
+        "ALTER TABLE t ADD COLUMN c INT",
+        "ALTER TABLE t ADD c INT",
+        "ALTER TABLE t ADD CONSTRAINT pk PRIMARY KEY (id)",
+        "ALTER TABLE t ADD PRIMARY KEY (id)",
+        "ALTER TABLE t DROP COLUMN c",
+        "ALTER TABLE t DROP c CASCADE",
+        "ALTER TABLE t DROP CONSTRAINT pk",
+        "ALTER TABLE t ALTER COLUMN c SET DEFAULT 0",
+        "ALTER TABLE t ALTER c TYPE BIGINT",
+        "ALTER TABLE t ALTER c SET NOT NULL",
+        "ALTER TABLE t RENAME TO t2",
+        "ALTER TABLE t RENAME COLUMN a TO b",
+        "ALTER TABLE t RENAME a TO b",
+    };
+    for (const char* sql : ok) {
+        parser.reset();
+        auto r = parser.parse(sql);
+        EXPECT_TRUE(r.has_value()) << "expected clean parse for: [" << sql << "]";
+        if (r.has_value()) EXPECT_EQ(parser.trailing_token_count(), 0u) << sql;
+    }
+}
+
+// An empty VALUES row `()` is a zero-element row value constructor (invalid).
+TEST(ParserNegativeTest, EmptyValuesRowRejected) {
+    expect_parse_error("VALUES ()");
+    expect_parse_error("INSERT INTO t (a) VALUES ()");
+    expect_parse_error("VALUES (1), ()");
+}
+
+// --- Silent-swallow of a tail clause keyword / dangling comma (pass-30) ------
+// A clause-introducing keyword consumed without its body (GROUP/ORDER without
+// BY, empty HAVING/LIMIT) or a dangling SELECT-list comma was advance()'d and
+// discarded, so trailing_token_count() reported 0 for malformed SQL. Reject.
+TEST(ParserNegativeTest, TailClauseKeywordSwallowRejected) {
+    expect_parse_error("SELECT id FROM users GROUP");
+    expect_parse_error("SELECT id FROM users ORDER");
+    expect_parse_error("SELECT id FROM users LIMIT");
+    expect_parse_error("SELECT id FROM users HAVING");
+    expect_parse_error("SELECT id, FROM users");
+}
+
+TEST(ParserNegativeTest, TailClauseFixDoesNotBreakValidQueries) {
+    Parser parser;
+    const char* ok[] = {
+        "SELECT id FROM users GROUP BY id",
+        "SELECT id FROM users ORDER BY id",
+        "SELECT id FROM users LIMIT 5",
+        "SELECT count(*) FROM users GROUP BY id HAVING count(*) > 1",
+        "SELECT id, name FROM users ORDER BY id LIMIT 10",
+        "SELECT 1 UNION SELECT 2 ORDER BY 1",
+    };
+    for (const char* sql : ok) {
+        parser.reset();
+        EXPECT_TRUE(parser.parse(sql).has_value())
+            << "expected clean parse for: [" << sql << "]";
+    }
+}
+
+// --- FOREIGN KEY referential-action clauses (pass-30 regression guard) -------
+// The strict CREATE TABLE column-list check wrongly rejected valid FK clauses
+// whose ON DELETE/UPDATE/MATCH/DEFERRABLE tail was left unconsumed. Both the
+// column-level and table-level FOREIGN KEY forms must now parse them, and a
+// following NOT NULL must NOT be eaten by the referential-action tail.
+TEST(ParserNegativeTest, ForeignKeyReferentialActionsParse) {
+    Parser parser;
+    const char* ok[] = {
+        "CREATE TABLE t (a INT REFERENCES b(id) ON DELETE CASCADE)",
+        "CREATE TABLE t (a INT REFERENCES b(id) ON DELETE SET NULL ON UPDATE CASCADE)",
+        "CREATE TABLE t (a INT REFERENCES b ON DELETE NO ACTION)",
+        "CREATE TABLE t (a INT REFERENCES b(id) MATCH FULL ON DELETE CASCADE)",
+        "CREATE TABLE t (a INT REFERENCES b(id) DEFERRABLE INITIALLY DEFERRED)",
+        "CREATE TABLE t (a INT REFERENCES b(id) NOT DEFERRABLE)",
+        "CREATE TABLE t (a INT REFERENCES b NOT NULL)",
+        "CREATE TABLE t (a INT REFERENCES b(id) NOT NULL, c INT)",
+        "CREATE TABLE t (a INT, FOREIGN KEY (a) REFERENCES b(id) ON DELETE CASCADE)",
+        "CREATE TABLE t (a INT, FOREIGN KEY (a) REFERENCES b(id) "
+        "ON DELETE SET NULL ON UPDATE RESTRICT)",
+    };
+    for (const char* sql : ok) {
+        parser.reset();
+        auto r = parser.parse(sql);
+        EXPECT_TRUE(r.has_value()) << "expected clean parse for: [" << sql << "]";
+        if (r.has_value()) EXPECT_EQ(parser.trailing_token_count(), 0u) << sql;
+    }
+    // A malformed referential action is still rejected.
+    parser.reset();
+    EXPECT_FALSE(parser.parse("CREATE TABLE t (a INT REFERENCES b(id) ON JUNK)").has_value());
+}
