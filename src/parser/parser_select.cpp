@@ -1145,13 +1145,18 @@ ast::ASTNode* Parser::parse_join_clause() {
     
     // Store JOIN type (LEFT, RIGHT, INNER, etc.)
     std::string join_type;
-    
+    // CROSS and NATURAL joins legitimately carry NO ON / USING specification;
+    // every other qualified join requires one.
+    bool is_natural = false;
+    bool is_cross = false;
+
     // Optional NATURAL prefix: NATURAL [INNER | LEFT [OUTER] | RIGHT [OUTER] |
     // FULL [OUTER]] JOIN. A NATURAL join carries no ON / USING clause; its join
     // columns are every column common to both inputs, resolved downstream.
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::NATURAL) {
         join_type = "NATURAL";
+        is_natural = true;
         advance(); // consume NATURAL
     }
 
@@ -1164,6 +1169,9 @@ ast::ASTNode* Parser::parse_join_clause() {
             kw == "INNER" || kw == "inner" ||
             kw == "FULL" || kw == "full" ||
             kw == "CROSS" || kw == "cross") {
+            if (kw == "CROSS" || kw == "cross") {
+                is_cross = true;
+            }
             if (!join_type.empty()) {
                 join_type += " ";
             }
@@ -1283,8 +1291,20 @@ ast::ASTNode* Parser::parse_join_clause() {
                 error("expected '(' with a column list after USING");
             }
         }
+        // No ON and no USING. Every qualified join REQUIRES a join
+        // specification; only CROSS and NATURAL joins may omit it. Without this
+        // guard `A JOIN B` (and INNER/LEFT/RIGHT/FULL JOIN with no ON/USING) was
+        // silently accepted (trailing==0) and lowered to an unconstrained
+        // cartesian product - the sibling `JOIN b ON`/`USING` forms are already
+        // guarded above; this is the one path that fell through.
+        else if (!is_cross && !is_natural) {
+            error("expected ON or USING for JOIN");
+        }
+    } else {
+        // `JOIN` with no table reference is a truncated statement.
+        error("expected a table reference after JOIN");
     }
-    
+
     return join_node;
 }
 
@@ -3058,9 +3078,68 @@ void Parser::synchronize() {
 
 // ========== Validation Methods ==========
 
+// A node type whose semantics REQUIRE at least one child. A childless instance
+// of one of these is definitionally invalid SQL and only ever arises from a
+// truncated statement that a parse function accepted anyway (the silent-accept
+// class). The set is deliberately conservative: it lists only nodes that are
+// NEVER legitimately childless. Notably excluded are FunctionCall (zero-arg
+// `now()` / `COUNT(*)` models the star as text), BinaryExpr (reused for
+// UPDATE/upsert `col = value` assignments that carry only the value child),
+// DropStmt / Savepoint / Pragma / Begin / Commit (their payload lives in
+// primary_text, not children), and set-op statements (validated separately).
+bool Parser::node_requires_child(ast::NodeType type) {
+    switch (type) {
+        // Statements defined by a required body subtree.
+        case ast::NodeType::CreateViewStmt:     // AS <query>
+        case ast::NodeType::CreateTriggerStmt:  // trigger body
+        case ast::NodeType::CreateIndexStmt:    // indexed column list
+        case ast::NodeType::ExplainStmt:        // inner statement
+        // Expressions with mandatory operands.
+        case ast::NodeType::CaseExpr:           // >= 1 WHEN branch
+        case ast::NodeType::CastExpr:           // operand (+ target type)
+        case ast::NodeType::ExistsExpr:         // subquery
+        case ast::NodeType::InExpr:             // LHS + list/subquery
+        case ast::NodeType::BetweenExpr:        // operand + bounds
+        case ast::NodeType::LikeExpr:           // operand + pattern
+        case ast::NodeType::SubqueryExpr:       // inner query
+        case ast::NodeType::Subquery:           // inner query
+        // Clauses that are only ever emitted with content.
+        case ast::NodeType::SelectList:         // >= 1 projection item
+        case ast::NodeType::FromClause:         // >= 1 table reference
+        case ast::NodeType::WhereClause:        // condition
+        case ast::NodeType::HavingClause:       // condition
+        // NB: GroupByClause is intentionally NOT here - `GROUP BY ()` (the empty
+        // grouping set / grand total) is valid and emits a childless clause.
+        case ast::NodeType::OrderByClause:      // >= 1 sort key
+        case ast::NodeType::SetClause:          // >= 1 assignment
+        case ast::NodeType::ValuesClause:       // >= 1 row
+        case ast::NodeType::ReturningClause:    // >= 1 item
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Parser::validate_structural(const ast::ASTNode* node) const {
+    if (!node) return true;
+    if (node_requires_child(node->node_type) && node->first_child == nullptr) {
+        return false;  // a required node was left childless -> reject the parse
+    }
+    for (const ast::ASTNode* child = node->first_child; child;
+         child = child->next_sibling) {
+        if (!validate_structural(child)) return false;
+    }
+    return true;
+}
+
 bool Parser::validate_ast(ast::ASTNode* root) {
     if (!root) return false;
-    
+
+    // Structural backstop first: no node that structurally requires a child may
+    // be childless. Runs across every statement type (the per-type checks below
+    // only cover SELECT / set-ops).
+    if (!validate_structural(root)) return false;
+
     // Dispatch based on statement type
     switch (root->node_type) {
         case ast::NodeType::SelectStmt:

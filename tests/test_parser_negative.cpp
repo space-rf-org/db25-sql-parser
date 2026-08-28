@@ -882,3 +882,141 @@ TEST(ParserNegativeTest, UtilityStatementsValidFormsStillParse) {
     parser.reset();
     EXPECT_TRUE(parser.parse("SET TIME ZONE 'UTC'").has_value());
 }
+
+// ===========================================================================
+// Systematic silent-accept sweep (the "childless required node" class).
+//
+// Each input below is a TRUNCATED statement: a parse function used to attach a
+// required sub-node only `if (child)` and otherwise return a childless node
+// with a clean (trailing_token_count()==0) parse - i.e. invalid SQL accepted as
+// a "successful" parse. Every parse function that exhibited the idiom was fixed
+// to reject the truncation, and the structural backstop
+// (Parser::validate_structural) rejects any residual childless-required node.
+// ===========================================================================
+
+// CREATE TABLE: name required; a body (column list or AS query) required.
+TEST(ParserNegativeTest, TruncatedCreateTableRejected) {
+    expect_parse_error("CREATE TABLE");            // no name, no body
+    expect_parse_error("CREATE TABLE t");          // name but no body
+    expect_parse_error("CREATE TABLE (a INT)");    // body but no name
+    expect_parse_error("CREATE TEMP TABLE t");     // TEMP, name, no body
+    expect_parse_error("CREATE TABLE t AS");       // AS but no query
+}
+
+// CREATE INDEX: name, ON <table>, and an indexed column list all required.
+TEST(ParserNegativeTest, TruncatedCreateIndexRejected) {
+    expect_parse_error("CREATE INDEX");              // no name
+    expect_parse_error("CREATE INDEX i");            // no ON
+    expect_parse_error("CREATE INDEX i ON");         // no table
+    expect_parse_error("CREATE INDEX i ON t");       // no column list
+    expect_parse_error("CREATE UNIQUE INDEX");       // UNIQUE but no name
+    expect_parse_error("CREATE UNIQUE INDEX i ON t");// no column list
+}
+
+// CREATE VIEW: name and AS <query> body required.
+TEST(ParserNegativeTest, TruncatedCreateViewRejected) {
+    expect_parse_error("CREATE VIEW");        // no name
+    expect_parse_error("CREATE VIEW v");      // no AS body
+    expect_parse_error("CREATE VIEW v AS");   // AS but no query
+}
+
+// CREATE SCHEMA: a name (or AUTHORIZATION owner) required.
+TEST(ParserNegativeTest, TruncatedCreateSchemaRejected) {
+    expect_parse_error("CREATE SCHEMA");                 // no name / no AUTHORIZATION
+    expect_parse_error("CREATE SCHEMA AUTHORIZATION");   // AUTHORIZATION but no owner
+}
+
+// CREATE TRIGGER: name, ON <table>, and a body all required.
+TEST(ParserNegativeTest, TruncatedCreateTriggerRejected) {
+    expect_parse_error("CREATE TRIGGER");                       // no name
+    expect_parse_error("CREATE TRIGGER tg");                    // no ON / body
+    expect_parse_error("CREATE TRIGGER tg BEFORE INSERT ON t"); // no body
+}
+
+// Transaction / savepoint statements that require a name.
+TEST(ParserNegativeTest, TruncatedSavepointStatementsRejected) {
+    expect_parse_error("SAVEPOINT");            // no name
+    expect_parse_error("RELEASE");              // no name
+    expect_parse_error("RELEASE SAVEPOINT");    // SAVEPOINT but no name
+    expect_parse_error("ROLLBACK TO");          // TO but no savepoint name
+    expect_parse_error("ROLLBACK TO SAVEPOINT");// SAVEPOINT but no name
+}
+
+// VACUUM INTO requires a filename; PRAGMA requires a name (and a value when the
+// `=` / `(` value syntax is present).
+TEST(ParserNegativeTest, TruncatedVacuumAndPragmaRejected) {
+    expect_parse_error("VACUUM INTO");   // INTO but no filename
+    expect_parse_error("PRAGMA");        // no pragma name
+    expect_parse_error("PRAGMA foo =");  // '=' but no value
+    expect_parse_error("PRAGMA foo (");  // '(' but no value
+}
+
+// A qualified JOIN requires ON / USING (only CROSS and NATURAL may omit it),
+// and a JOIN requires a right-hand table reference.
+TEST(ParserNegativeTest, JoinWithoutSpecificationRejected) {
+    expect_parse_error("SELECT * FROM a JOIN b");        // no ON / USING
+    expect_parse_error("SELECT * FROM a INNER JOIN b");  // no ON / USING
+    expect_parse_error("SELECT * FROM a LEFT JOIN b");   // no ON / USING
+    expect_parse_error("SELECT * FROM a JOIN");          // no right table
+}
+
+// DELETE / UPDATE: a dangling WHERE with no predicate is a truncated statement.
+TEST(ParserNegativeTest, DanglingWhereInDmlRejected) {
+    expect_parse_error("DELETE FROM t WHERE");         // no condition
+    expect_parse_error("UPDATE t SET a = 1 WHERE");    // no condition
+}
+
+// ON CONFLICT DO must be NOTHING or UPDATE; DO UPDATE requires a SET clause.
+TEST(ParserNegativeTest, TruncatedOnConflictActionRejected) {
+    expect_parse_error("INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO");
+    expect_parse_error("INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO UPDATE");
+    expect_parse_error("INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO UPDATE SET");
+}
+
+// Guard: the well-formed counterparts of every truncation above still parse
+// cleanly (no trailing tokens). This pins that the sweep did not over-reject -
+// in particular that keyword-as-name leniency (a table/index/view/trigger named
+// with a word that tokenizes as a keyword, e.g. `data`) is preserved, and that
+// CROSS/NATURAL joins and array column types remain valid.
+TEST(ParserNegativeTest, SweptStatementsValidFormsStillParse) {
+    Parser parser;
+    const char* ok[] = {
+        // CREATE family
+        "CREATE TABLE t (a INT, b TEXT)",
+        "CREATE TABLE data (ids INTEGER[])",          // keyword-as-name + array type
+        "CREATE TABLE t AS SELECT 1",
+        "CREATE INDEX i ON t (a)",
+        "CREATE UNIQUE INDEX i ON t (a, b)",
+        "CREATE VIEW v AS SELECT 1",
+        "CREATE VIEW v AS VALUES (1), (2)",
+        "CREATE SCHEMA s",
+        "CREATE SCHEMA AUTHORIZATION owner",
+        "CREATE TRIGGER tg BEFORE INSERT ON t BEGIN SELECT 1; END",
+        // transaction / utility
+        "SAVEPOINT sp",
+        "RELEASE sp",
+        "RELEASE SAVEPOINT sp",
+        "ROLLBACK TO sp",
+        "ROLLBACK TO SAVEPOINT sp",
+        "VACUUM INTO 'backup.db'",
+        "PRAGMA foreign_keys",
+        "PRAGMA foreign_keys = 1",
+        "PRAGMA table_info(t)",
+        // joins
+        "SELECT * FROM a JOIN b ON a.id = b.id",
+        "SELECT * FROM a JOIN b USING (id)",
+        "SELECT * FROM a CROSS JOIN b",
+        "SELECT * FROM a NATURAL JOIN b",
+        // DML with WHERE / upsert
+        "DELETE FROM t WHERE a = 1",
+        "UPDATE t SET a = 1 WHERE b = 2",
+        "INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO NOTHING",
+        "INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO UPDATE SET a = 2",
+    };
+    for (const char* sql : ok) {
+        parser.reset();
+        auto r = parser.parse(sql);
+        EXPECT_TRUE(r.has_value()) << "expected clean parse for: [" << sql << "]";
+        if (r.has_value()) EXPECT_EQ(parser.trailing_token_count(), 0u) << sql;
+    }
+}

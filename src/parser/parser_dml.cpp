@@ -439,16 +439,20 @@ ast::ASTNode* Parser::parse_update_stmt() {
         }
     }
     
-    // Optional WHERE clause
+    // Optional WHERE clause. Once WHERE is present a predicate is required;
+    // `UPDATE t SET a=1 WHERE` with no condition was previously accepted with
+    // the dangling WHERE silently dropped.
     if (current_token_ && current_token_->keyword_id == db25::Keyword::WHERE) {
         advance();  // consume WHERE (parse_where_clause parses only the condition)
         auto* where_clause = parse_where_clause();
-        if (where_clause) {
-            where_clause->parent = update_node;
-            last_child->next_sibling = where_clause;
-            last_child = where_clause;
-            update_node->child_count++;
+        if (!where_clause) {
+            error("expected a condition after WHERE in UPDATE");
+            return nullptr;
         }
+        where_clause->parent = update_node;
+        last_child->next_sibling = where_clause;
+        last_child = where_clause;
+        update_node->child_count++;
     }
     
     // Optional RETURNING clause (PostgreSQL extension). Parse each item as a
@@ -540,18 +544,22 @@ ast::ASTNode* Parser::parse_delete_stmt() {
         delete_node->child_count++;
     }
     
-    // Optional WHERE clause
+    // Optional WHERE clause. Once WHERE is present a predicate is required;
+    // `DELETE FROM t WHERE` with no condition was previously accepted with the
+    // dangling WHERE silently dropped.
     if (current_token_ && current_token_->keyword_id == db25::Keyword::WHERE) {
         advance();  // consume WHERE (parse_where_clause parses only the condition)
         auto* where_clause = parse_where_clause();
-        if (where_clause) {
-            where_clause->parent = delete_node;
-            last_child->next_sibling = where_clause;
-            last_child = where_clause;
-            delete_node->child_count++;
+        if (!where_clause) {
+            error("expected a condition after WHERE in DELETE");
+            return nullptr;
         }
+        where_clause->parent = delete_node;
+        last_child->next_sibling = where_clause;
+        last_child = where_clause;
+        delete_node->child_count++;
     }
-    
+
     // Optional RETURNING clause (PostgreSQL extension). Parse each item as a
     // full expression via the shared helper (as INSERT does); the previous
     // inline parse_column_ref() loop truncated expression items and dropped
@@ -709,8 +717,14 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
         } else if (current_token_ && current_token_->keyword_id == db25::Keyword::UPDATE) {
             advance();  // consume UPDATE
             on_conflict->semantic_flags |= 0x02;  // DO UPDATE flag
-            
-            if (current_token_ && current_token_->keyword_id == db25::Keyword::SET) {
+
+            // DO UPDATE requires a SET clause. `ON CONFLICT (a) DO UPDATE` with
+            // no SET was previously accepted as a DO-UPDATE with no assignments.
+            if (!current_token_ || current_token_->keyword_id != db25::Keyword::SET) {
+                error("expected SET after ON CONFLICT DO UPDATE");
+                return nullptr;
+            }
+            {
                 advance();  // consume SET
                 
                 // Parse SET assignments
@@ -789,9 +803,15 @@ ast::ASTNode* Parser::parse_on_conflict_clause() {
                     return nullptr;
                 }
             }
+        } else {
+            // DO must be followed by NOTHING or UPDATE. `ON CONFLICT ... DO`
+            // (EOF) or `DO <garbage>` previously left the conflict action unset
+            // and returned a clean parse.
+            error("expected NOTHING or UPDATE after ON CONFLICT DO");
+            return nullptr;
         }
     }
-    
+
     return on_conflict;
 }
 
