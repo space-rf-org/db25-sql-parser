@@ -838,3 +838,47 @@ TEST(ParserNegativeTest, ForeignKeyReferentialActionsParse) {
     parser.reset();
     EXPECT_FALSE(parser.parse("CREATE TABLE t (a INT REFERENCES b(id) ON JUNK)").has_value());
 }
+
+// --- Truncated utility statements (pass-31 audit) ---------------------------
+// EXPLAIN / ATTACH / DETACH / SET each built a childless node with trailing==0
+// on incomplete input (the inner element parsed to null and was silently
+// dropped). Each truncated form must now be a syntax error.
+TEST(ParserNegativeTest, TruncatedUtilityStatementsRejected) {
+    expect_parse_error("EXPLAIN");             // no statement to explain
+    expect_parse_error("EXPLAIN ANALYZE");     // ANALYZE but no statement
+    expect_parse_error("ATTACH");              // no filename
+    expect_parse_error("ATTACH DATABASE");     // DATABASE but no filename
+    expect_parse_error("DETACH");              // no schema name
+    expect_parse_error("DETACH DATABASE");     // DATABASE but no schema name
+    expect_parse_error("SET");                 // no parameter
+    expect_parse_error("SET x");               // name but no value
+    expect_parse_error("SET x =");             // '=' but no value
+}
+
+// Guard: the well-formed utility statements still parse, including the SET
+// value forms with '='/TO and the space form (SET NAMES <v>), and the
+// keyword-led `SET TIME ZONE ...` stays leniently tolerated (trailing tokens).
+TEST(ParserNegativeTest, UtilityStatementsValidFormsStillParse) {
+    Parser parser;
+    const char* ok[] = {
+        "EXPLAIN SELECT 1",
+        "EXPLAIN ANALYZE SELECT 1",
+        "ATTACH 'file.db' AS d",
+        "ATTACH DATABASE 'file.db' AS d",
+        "DETACH d",
+        "DETACH DATABASE d",
+        "SET x = 5",
+        "SET x TO 5",
+        "SET SESSION x = 5",
+        "SET NAMES utf8",
+    };
+    for (const char* sql : ok) {
+        parser.reset();
+        auto r = parser.parse(sql);
+        EXPECT_TRUE(r.has_value()) << "expected clean parse for: [" << sql << "]";
+        if (r.has_value()) EXPECT_EQ(parser.trailing_token_count(), 0u) << sql;
+    }
+    // Keyword-led SET form is still tolerated (unmodeled -> trailing tokens).
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SET TIME ZONE 'UTC'").has_value());
+}

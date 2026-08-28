@@ -161,14 +161,18 @@ ast::ASTNode* Parser::parse_explain_stmt() {
         advance(); // consume ANALYZE
     }
     
-    // Parse the statement to explain
+    // Parse the statement to explain. EXPLAIN requires one; `EXPLAIN` (or
+    // `EXPLAIN ANALYZE`) with no statement previously produced a childless
+    // ExplainStmt and a clean parse of an incomplete statement.
     auto* stmt = parse_statement();
-    if (stmt) {
-        stmt->parent = explain_node;
-        explain_node->first_child = stmt;
-        explain_node->child_count = 1;
+    if (!stmt) {
+        error("expected a statement to EXPLAIN");
+        return nullptr;
     }
-    
+    stmt->parent = explain_node;
+    explain_node->first_child = stmt;
+    explain_node->child_count = 1;
+
     return explain_node;
 }
 
@@ -338,26 +342,40 @@ ast::ASTNode* Parser::parse_set_stmt() {
         advance();
     }
     
-    // Parse parameter name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+    // SET requires a parameter to set; a bare `SET` previously produced a
+    // childless SetStmt and a clean parse.
+    if (!current_token_ ||
+        current_token_->type == tokenizer::TokenType::EndOfFile) {
+        error("expected a parameter after SET");
+        return nullptr;
+    }
+
+    // The `name = value` / `name TO value` form. (Keyword-led special forms such
+    // as `SET TIME ZONE ...` / `SET NAMES ...` are not modeled and are left as
+    // trailing tokens for trailing_token_count(), so only tighten the
+    // identifier-name form here.)
+    if (current_token_->type == tokenizer::TokenType::Identifier) {
         set_node->primary_text = copy_to_arena(current_token_->value);
         advance();
-        
-        // Parse = or TO
-        if (current_token_ && (current_token_->value == "=" || 
+
+        // Optional `=` / `TO` before the value (`SET x = 5`, `SET x TO 5`); the
+        // space form `SET name value` (`SET NAMES utf8`) omits it.
+        if (current_token_ && (current_token_->value == "=" ||
                                current_token_->keyword_id == db25::Keyword::TO)) {
             advance();
-            
-            // Parse value
-            auto* value = parse_expression(0);
-            if (value) {
-                value->parent = set_node;
-                set_node->first_child = value;
-                set_node->child_count = 1;
-            }
         }
+        // A value is required either way: `SET x` and `SET x =` (with nothing
+        // after) previously parsed cleanly as truncated statements.
+        auto* value = parse_expression(0);
+        if (!value) {
+            error("expected a value for the parameter in SET");
+            return nullptr;
+        }
+        value->parent = set_node;
+        set_node->first_child = value;
+        set_node->child_count = 1;
     }
-    
+
     return set_node;
 }
 
@@ -437,23 +455,27 @@ ast::ASTNode* Parser::parse_attach_stmt() {
         advance(); // consume DATABASE
     }
     
-    // Parse filename expression
+    // Parse filename expression. ATTACH requires one; `ATTACH` / `ATTACH
+    // DATABASE` with no filename previously produced a childless AttachStmt and
+    // a clean parse.
     auto* filename = parse_expression(0);
-    if (filename) {
-        filename->parent = attach_node;
-        attach_node->first_child = filename;
-        attach_node->child_count = 1;
-        
-        // Parse AS schema_name
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::AS) {
-            advance(); // consume AS
-            if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-                attach_node->primary_text = copy_to_arena(current_token_->value);
-                advance();
-            }
+    if (!filename) {
+        error("expected a database filename after ATTACH");
+        return nullptr;
+    }
+    filename->parent = attach_node;
+    attach_node->first_child = filename;
+    attach_node->child_count = 1;
+
+    // Parse AS schema_name
+    if (current_token_ && current_token_->keyword_id == db25::Keyword::AS) {
+        advance(); // consume AS
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+            attach_node->primary_text = copy_to_arena(current_token_->value);
+            advance();
         }
     }
-    
+
     return attach_node;
 }
 
@@ -472,12 +494,16 @@ ast::ASTNode* Parser::parse_detach_stmt() {
         advance(); // consume DATABASE
     }
     
-    // Parse schema name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        detach_node->primary_text = copy_to_arena(current_token_->value);
-        advance();
+    // Parse schema name. DETACH requires one; `DETACH` / `DETACH DATABASE` with
+    // no schema name previously produced a childless DetachStmt and a clean
+    // parse.
+    if (!current_token_ || current_token_->type != tokenizer::TokenType::Identifier) {
+        error("expected a schema name after DETACH");
+        return nullptr;
     }
-    
+    detach_node->primary_text = copy_to_arena(current_token_->value);
+    advance();
+
     return detach_node;
 }
 
