@@ -435,16 +435,22 @@ ast::ASTNode* Parser::parse_select_stmt() {
 
             auto* group_by = parse_group_by_clause();
             if (!group_by) {
-                // parse_group_by_clause returns null in two cases. If it recorded a
-                // hard error (an unsupported comma-separated ROLLUP/CUBE/GROUPING
-                // SETS list), fail the whole parse rather than silently continue as
-                // if the GROUP BY were absent - which would drop the grouping and
-                // mis-execute the query. Otherwise the item was simply
-                // missing/empty (`... GROUP BY` with nothing after): stay lenient
-                // and continue without a grouping clause, as before.
-                if (has_error_) {
-                    return nullptr;
+                // parse_group_by_clause returns null in two cases, both of which
+                // must fail the parse. (1) It recorded a hard error (an
+                // unsupported comma-separated ROLLUP/CUBE/GROUPING SETS list) -
+                // return so the failure unwinds. (2) It found no grouping element
+                // at all after GROUP BY (`... GROUP BY` with nothing, `GROUP BY
+                // HAVING ...`, a trailing `GROUP BY (),`): a truncated statement.
+                // The empty grouping set `GROUP BY ()` does NOT reach here - it
+                // returns a childless GroupByClause - so a null return always
+                // means a genuinely missing grouping list. Previously this stayed
+                // lenient and dropped the clause with a clean (trailing==0) parse,
+                // the same silent-swallow class the WHERE / HAVING / ORDER BY
+                // guards reject; make GROUP BY consistent with them.
+                if (!has_error_) {
+                    error("expected a grouping element after GROUP BY");
                 }
+                return nullptr;
             } else {
                 group_by->parent = select_node;
                 // Add to the end of child list

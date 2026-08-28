@@ -234,16 +234,17 @@ TEST_F(PrecedenceRegressionTest, MixedCaseIntersectBindsTighterThanUnion) {
     EXPECT_EQ(right->node_type, NodeType::IntersectStmt);
 }
 
-// GROUP BY with a missing item must not crash (regression: the old code called
-// global delete on an arena-allocated node -> UB). The parser is lenient, so it
-// still returns a SelectStmt; the point is that it completes cleanly (and does
-// so under ASan/UBSan in CI).
-TEST_F(PrecedenceRegressionTest, GroupByMissingItemNoCrash) {
-    auto* ast = parse("SELECT x FROM t GROUP BY");
-    ASSERT_NE(ast, nullptr);
-    EXPECT_EQ(ast->node_type, NodeType::SelectStmt);
-    // No GroupByClause child should have been attached (the item failed to parse).
-    EXPECT_EQ(find(ast, NodeType::GroupByClause), nullptr);
+// GROUP BY with a missing grouping element must not crash (regression: the old
+// code called global delete on an arena-allocated node -> UB) AND must be
+// rejected as a truncated statement. `... GROUP BY` with nothing after it is
+// invalid SQL; it was previously accepted leniently with the clause silently
+// dropped (a clean, trailing==0 parse - the same silent-swallow class the
+// WHERE / HAVING / ORDER BY guards reject). It is now a syntax error. The
+// no-crash intent (no UB under ASan/UBSan) is preserved on the failure path.
+// (`GROUP BY ()`, the empty grouping set, is still valid - see test_group_by.)
+TEST_F(PrecedenceRegressionTest, GroupByMissingItemRejected) {
+    auto result = parser->parse("SELECT x FROM t GROUP BY");
+    EXPECT_FALSE(result.has_value());
 }
 
 // ---- Set-operation operand / trailing-clause fixes ------------------------
