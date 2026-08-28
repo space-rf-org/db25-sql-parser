@@ -299,13 +299,11 @@ ADD COLUMN discount_percentage DECIMAL(5, 2) DEFAULT 0 CHECK (discount_percentag
 # ADVANCED EXPRESSIONS
 # ============================================
 
-# String operations
-# NOTE: uses the comma-form SUBSTRING(str, start, len) and STRPOS(str, sub); the
-# SQL-standard keyword-argument forms SUBSTRING(str FROM a FOR b) / POSITION(sub
-# IN str) are not yet parsed (see issue: SQL92 keyword-argument function forms).
+# String operations (SQL-standard keyword-argument forms: SUBSTRING(str FROM a
+# FOR b), POSITION(sub IN str))
 SELECT
     UPPER(first_name) || ' ' || LOWER(last_name) as formatted_name,
-    SUBSTRING(email, 1, STRPOS(email, '@') - 1) as username,
+    SUBSTRING(email FROM 1 FOR POSITION('@' IN email) - 1) as username,
     LENGTH(bio) as bio_length
 FROM users
 WHERE email LIKE '%@example.com'

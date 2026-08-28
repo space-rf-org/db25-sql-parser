@@ -336,7 +336,18 @@ protected:
     [[nodiscard]] ast::ASTNode* parse_cast_postfix(ast::ASTNode* operand,
                                                    std::size_t& fold_depth);
     [[nodiscard]] ast::ASTNode* parse_extract_expression();
-    
+
+    // SQL-standard keyword-argument function forms that use IN / FROM / FOR
+    // instead of commas: POSITION(sub IN str), SUBSTRING(str FROM a [FOR b]),
+    // TRIM([LEADING|TRAILING|BOTH] [chars] FROM str). Called from
+    // parse_function_call once the '(' is consumed (parenthesis_depth_ already
+    // incremented); parses the whole argument list, consumes the ')', and
+    // returns func_call (or nullptr after error()). The comma forms
+    // (SUBSTRING(str, a, b), TRIM(str), POSITION(a, b)) are handled here too so
+    // both spellings keep working. `upper_name` is the upper-cased callee.
+    [[nodiscard]] ast::ASTNode* parse_string_keyword_call(ast::ASTNode* func_call,
+                                                          std::string_view upper_name);
+
     // ========== Pratt Parser for Expressions ==========
     
     [[nodiscard]] ast::ASTNode* parse_expression(int min_precedence = 0);
@@ -376,6 +387,12 @@ protected:
     
     int parenthesis_depth_ = 0;  // Track parenthesis balance
     bool strict_mode_ = true;    // Enable strict validation
+    // When >= 0, the keyword IN is NOT treated as a binary operator while
+    // parenthesis_depth_ equals this value. Used to parse the first operand of
+    // POSITION(sub IN str), whose `IN` separates the two operands rather than
+    // being the membership operator. Depth-scoped so a genuine `IN (...)` nested
+    // one level deeper inside that operand is unaffected. See get_precedence().
+    int suppress_in_at_depth_ = -1;
     // True while parsing the right-hand branch of a set operation. It tells
     // parse_select_stmt to return the bare branch instead of consuming the
     // following set operators itself, so the caller's loop can fold them

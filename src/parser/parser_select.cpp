@@ -2281,6 +2281,9 @@ ast::ASTNode* Parser::parse_function_call() {
     
     // Store function name
     std::string_view func_name = current_token_->value;
+    // A DELIMITED name ("substring") is an ordinary user function, never the
+    // SQL-standard keyword-argument special form - the quotes force that reading.
+    const bool name_delimited = current_token_->delimited;
     advance();
     
     // Must be followed by '('
@@ -2301,7 +2304,23 @@ ast::ASTNode* Parser::parse_function_call() {
     
     parenthesis_depth_++;
     advance(); // consume '('
-    
+
+    // SQL-standard keyword-argument function forms: POSITION(sub IN str),
+    // SUBSTRING(str FROM a [FOR b]), TRIM([LEADING|TRAILING|BOTH] [chars] FROM
+    // str). These use IN / FROM / FOR instead of commas, so the generic
+    // comma-separated argument loop below cannot parse them. Route them (and,
+    // for uniformity, their comma spellings) through a dedicated parser.
+    if (!name_delimited) {
+        std::string upper;
+        upper.reserve(func_name.size());
+        for (char c : func_name) {
+            upper.push_back((c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c);
+        }
+        if (upper == "POSITION" || upper == "SUBSTRING" || upper == "TRIM") {
+            return parse_string_keyword_call(func_call, upper);
+        }
+    }
+
     // Check for a leading set-quantifier (for aggregate functions). DISTINCT
     // de-duplicates the input; ALL is its dual and the DEFAULT, so it is a no-op
     // that must still be CONSUMED - otherwise `count(ALL x)` / `sum(ALL x)` (legal
@@ -2534,8 +2553,171 @@ ast::ASTNode* Parser::parse_function_call() {
             func_call->child_count++;
         }
     }
-    
+
     return func_call;
+}
+
+// SQL-standard keyword-argument function forms. Called from parse_function_call
+// with the '(' already consumed (parenthesis_depth_ incremented) and
+// current_token_ at the first argument token. Parses the argument list, consumes
+// the closing ')', and returns func_call; on a malformed form it calls error()
+// and returns nullptr. Both the keyword spelling (IN / FROM / FOR) and the
+// ordinary comma spelling are accepted so neither regresses. TRIM's trim
+// specification (LEADING/TRAILING/BOTH) is recorded in semantic_flags bits 12-13
+// rather than as a child, so it never reaches the analyzer as a bogus column and
+// the argument children stay exactly the value expressions (which the analyzer
+// types by name and whose nullability it ORs).
+ast::ASTNode* Parser::parse_string_keyword_call(ast::ASTNode* func_call,
+                                                std::string_view upper_name) {
+    // Trim-spec encoding (FunctionCall semantic_flags bits 12-13): clear of the
+    // Distinct (bit 0) and window-function (bit 8) markers used elsewhere.
+    constexpr uint16_t kTrimLeading  = 1u << 12;
+    constexpr uint16_t kTrimTrailing = 2u << 12;
+    constexpr uint16_t kTrimBoth     = 3u << 12;
+
+    push_context(ParseContext::FUNCTION_ARG);
+
+    // Append `node` as func_call's last child.
+    ast::ASTNode* last = nullptr;
+    auto append = [&](ast::ASTNode* node) {
+        node->parent = func_call;
+        if (!func_call->first_child) {
+            func_call->first_child = node;
+        } else if (last) {
+            last->next_sibling = node;
+        } else {
+            ast::ASTNode* l = func_call->first_child;
+            while (l->next_sibling) l = l->next_sibling;
+            l->next_sibling = node;
+        }
+        last = node;
+        func_call->child_count++;
+    };
+    // Consume the closing ')'. Returns func_call on success; errors otherwise.
+    auto finish = [&]() -> ast::ASTNode* {
+        if (current_token_ && current_token_->value == ")") {
+            if (parenthesis_depth_ > 0) parenthesis_depth_--;
+            advance();  // consume ')'
+            pop_context();
+            return func_call;
+        }
+        error("expected ')' to close " + std::string(upper_name) + "()");
+        pop_context();
+        return nullptr;
+    };
+    auto is_kw = [&](db25::Keyword k) {
+        return current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
+               current_token_->keyword_id == k;
+    };
+    // Parse one comma-tail: `, e , e ...` after the first argument is attached.
+    auto comma_tail = [&]() -> bool {
+        while (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
+               current_token_->value == ",") {
+            advance();  // consume ','
+            ast::ASTNode* e = parse_expression(0);
+            if (!e) { error("expected an argument after ',' in " +
+                            std::string(upper_name) + "()"); return false; }
+            append(e);
+        }
+        return true;
+    };
+
+    if (upper_name == "TRIM") {
+        // Optional leading trim specification (LEADING / TRAILING / BOTH). These
+        // are ordinary identifiers to the tokenizer, so match by text.
+        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier &&
+            !current_token_->delimited) {
+            std::string s;
+            for (char c : current_token_->value)
+                s.push_back((c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c);
+            if (s == "LEADING")  { func_call->semantic_flags |= kTrimLeading;  advance(); }
+            else if (s == "TRAILING") { func_call->semantic_flags |= kTrimTrailing; advance(); }
+            else if (s == "BOTH") { func_call->semantic_flags |= kTrimBoth; advance(); }
+        }
+        // TRIM(spec FROM str) / TRIM(FROM str): no characters expression.
+        if (is_kw(db25::Keyword::FROM)) {
+            advance();  // consume FROM
+            ast::ASTNode* str = parse_expression(0);
+            if (!str) { error("expected the source string after FROM in TRIM()");
+                        pop_context(); return nullptr; }
+            append(str);
+            return finish();
+        }
+        // Otherwise an expression comes first: the characters-to-trim (keyword
+        // form `TRIM(chars FROM str)`), or the source itself (`TRIM(str)` /
+        // comma form `TRIM(str, chars)`).
+        ast::ASTNode* first = parse_expression(0);
+        if (!first) { error("expected an argument in TRIM()"); pop_context(); return nullptr; }
+        append(first);
+        if (is_kw(db25::Keyword::FROM)) {
+            advance();  // consume FROM
+            ast::ASTNode* str = parse_expression(0);
+            if (!str) { error("expected the source string after FROM in TRIM()");
+                        pop_context(); return nullptr; }
+            append(str);
+            return finish();
+        }
+        if (!comma_tail()) { pop_context(); return nullptr; }
+        return finish();
+    }
+
+    if (upper_name == "SUBSTRING") {
+        // SUBSTRING(str FROM a [FOR b]) / SUBSTRING(str FOR b) or the comma form.
+        ast::ASTNode* str = parse_expression(0);
+        if (!str) { error("expected the source string in SUBSTRING()");
+                    pop_context(); return nullptr; }
+        append(str);
+        bool keyword_form = false;
+        if (is_kw(db25::Keyword::FROM)) {
+            keyword_form = true;
+            advance();  // consume FROM
+            ast::ASTNode* from = parse_expression(0);
+            if (!from) { error("expected a start position after FROM in SUBSTRING()");
+                         pop_context(); return nullptr; }
+            append(from);
+        }
+        if (is_kw(db25::Keyword::FOR)) {
+            keyword_form = true;
+            advance();  // consume FOR
+            ast::ASTNode* len = parse_expression(0);
+            if (!len) { error("expected a length after FOR in SUBSTRING()");
+                        pop_context(); return nullptr; }
+            append(len);
+        }
+        if (!keyword_form) {
+            if (!comma_tail()) { pop_context(); return nullptr; }
+        }
+        return finish();
+    }
+
+    // POSITION(sub IN str). IN is suppressed as an operator only while parsing
+    // the first operand at this exact paren depth (a genuine `IN (...)` nested
+    // deeper inside the operand still parses). The comma form POSITION(a, b) is
+    // also accepted; a single-argument POSITION(x) is rejected (it is neither the
+    // standard keyword form nor a valid comma form).
+    const int saved_suppress = suppress_in_at_depth_;
+    suppress_in_at_depth_ = parenthesis_depth_;
+    ast::ASTNode* sub = parse_expression(0);
+    suppress_in_at_depth_ = saved_suppress;
+    if (!sub) { error("expected the search string in POSITION()");
+                pop_context(); return nullptr; }
+    append(sub);
+    if (is_kw(db25::Keyword::IN)) {
+        advance();  // consume IN
+        ast::ASTNode* str = parse_expression(0);
+        if (!str) { error("expected the source string after IN in POSITION()");
+                    pop_context(); return nullptr; }
+        append(str);
+        return finish();
+    }
+    if (current_token_ && current_token_->type == tokenizer::TokenType::Delimiter &&
+        current_token_->value == ",") {
+        if (!comma_tail()) { pop_context(); return nullptr; }
+        return finish();
+    }
+    error("POSITION requires the form POSITION(substring IN string)");
+    pop_context();
+    return nullptr;
 }
 
 // ========== Window Specification Parser ==========

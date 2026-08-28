@@ -239,6 +239,10 @@ if(BUILD_TESTS)
     # Negative-path tests - malformed SQL returns an error Result without crashing
     add_parser_test(test_parser_negative tests/test_parser_negative.cpp)
 
+    # SQL-standard keyword-argument string functions: POSITION(x IN y),
+    # SUBSTRING(s FROM a FOR b), TRIM([spec] [chars] FROM s).
+    add_parser_test(test_string_keyword_functions tests/test_string_keyword_functions.cpp)
+
     # Add custom target for generating visual dumps
     add_custom_target(generate_ast_dumps
         COMMAND test_ast_dump --save --verbose
