@@ -2690,15 +2690,16 @@ ast::ASTNode* Parser::parse_string_keyword_call(ast::ASTNode* func_call,
         return finish();
     }
 
-    // POSITION(sub IN str). IN is suppressed as an operator only while parsing
-    // the first operand at this exact paren depth (a genuine `IN (...)` nested
-    // deeper inside the operand still parses). The comma form POSITION(a, b) is
-    // also accepted; a single-argument POSITION(x) is rejected (it is neither the
-    // standard keyword form nor a valid comma form).
-    const int saved_suppress = suppress_in_at_depth_;
-    suppress_in_at_depth_ = parenthesis_depth_;
+    // POSITION(sub IN str). Only the operand's OWN top-level IN separates the two
+    // operands; a membership IN inside a nested sub-expression (a CASE branch, a
+    // parenthesized group, a function argument) stays the membership operator.
+    // Arm the one-shot suppression, which parse_expression() consumes at entry
+    // and applies to its top Pratt level alone (see arm_top_in_suppression_). The
+    // comma form POSITION(a, b) is also accepted; a single-argument POSITION(x)
+    // is rejected (it is neither the standard keyword form nor a valid comma form).
+    arm_top_in_suppression_ = true;
     ast::ASTNode* sub = parse_expression(0);
-    suppress_in_at_depth_ = saved_suppress;
+    arm_top_in_suppression_ = false;  // clear if the operand was empty (else already consumed)
     if (!sub) { error("expected the search string in POSITION()");
                 pop_context(); return nullptr; }
     append(sub);

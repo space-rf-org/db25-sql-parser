@@ -706,10 +706,13 @@ int Parser::get_precedence() const {
         if (current_token_->keyword_id == db25::Keyword::BETWEEN) return 5;  // PREC_RANGE
         if (current_token_->keyword_id == db25::Keyword::IN) {
             // Inside the first operand of POSITION(sub IN str), IN separates the
-            // two operands and is not the membership operator. Suppress it only
-            // at the operand's own paren depth (a real `IN (...)` nested deeper
-            // in that operand keeps working). See suppress_in_at_depth_.
-            if (suppress_in_at_depth_ >= 0 && parenthesis_depth_ == suppress_in_at_depth_) {
+            // two operands and is not the membership operator. Suppressed only at
+            // the operand's top Pratt level (this flag is set for a single
+            // get_precedence() call in the arming invocation's own operator loop);
+            // a membership `IN` in any nested sub-expression - a parenthesized
+            // group, a CASE branch, a function argument - keeps working, because
+            // the nested parse_expression() cleared the arming flag on entry.
+            if (in_op_suppresses_in_) {
                 return 0;
             }
             return 5;  // PREC_RANGE
@@ -740,7 +743,15 @@ int Parser::get_precedence() const {
 ast::ASTNode* Parser::parse_expression(int min_precedence) {
     DepthGuard guard(this);  // Protect against deep recursion
     if (!guard.is_valid()) return nullptr;
-    
+
+    // Consume the POSITION operand-separator one-shot: it applies to THIS
+    // invocation's top-level operator loop only. Clearing it here means any
+    // nested parse_expression() (a parenthesized group, a CASE branch, a
+    // function argument parsed below) sees it false, so a membership `IN` there
+    // parses normally - only this operand's own top-level IN is suppressed.
+    const bool suppress_top_in = arm_top_in_suppression_;
+    arm_top_in_suppression_ = false;
+
     // Pratt parser with proper precedence handling
     
     // Prefetch upcoming tokens for expression parsing
@@ -839,7 +850,11 @@ ast::ASTNode* Parser::parse_expression(int min_precedence) {
             return nullptr;
         }
 
+        // Suppress the operand-separator IN only for this one classification, at
+        // this invocation's top Pratt level (see arm_top_in_suppression_).
+        in_op_suppresses_in_ = suppress_top_in;
         int precedence = get_precedence();
+        in_op_suppresses_in_ = false;
 
         // Check for invalid operators in strict mode
         if (strict_mode_ && precedence == -1) {
