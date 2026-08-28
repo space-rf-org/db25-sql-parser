@@ -422,9 +422,17 @@ ast::ASTNode* Parser::parse_select_stmt() {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::GROUP)) {
         advance(); // consume GROUP
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::BY) {
+        // GROUP must be followed by BY. `... GROUP` alone previously consumed
+        // and DROPPED the keyword with a clean parse (trailing==0), so a
+        // truncated statement flowed through analyze/bind as if there were no
+        // GROUP BY - the same silent-swallow class the FROM guard rejects.
+        if (!current_token_ || current_token_->keyword_id != db25::Keyword::BY) {
+            error("expected BY after GROUP");
+            return nullptr;
+        }
+        {
             advance(); // consume BY
-            
+
             auto* group_by = parse_group_by_clause();
             if (!group_by) {
                 // parse_group_by_clause returns null in two cases. If it recorded a
@@ -454,18 +462,22 @@ ast::ASTNode* Parser::parse_select_stmt() {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::HAVING)) {
         advance(); // consume HAVING
-        
+
         auto* having_clause = parse_having_clause();
-        if (having_clause) {
-            having_clause->parent = select_node;
-            // Add to the end of child list
-            auto* last_child = select_node->first_child;
-            while (last_child->next_sibling) {
-                last_child = last_child->next_sibling;
-            }
-            last_child->next_sibling = having_clause;
-            select_node->child_count++;
+        // HAVING requires a predicate; `... HAVING` alone previously consumed and
+        // dropped the keyword with a clean parse (silent swallow).
+        if (!having_clause) {
+            error("expected a predicate after HAVING");
+            return nullptr;
         }
+        having_clause->parent = select_node;
+        // Add to the end of child list
+        auto* last_child = select_node->first_child;
+        while (last_child->next_sibling) {
+            last_child = last_child->next_sibling;
+        }
+        last_child->next_sibling = having_clause;
+        select_node->child_count++;
     }
     
     // A bare set-operation operand (the right branch, and the left before folding)
@@ -510,19 +522,32 @@ void Parser::attach_trailing_order_limit(ast::ASTNode* target) {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::ORDER)) {
         advance(); // consume ORDER
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::BY) {
-            advance(); // consume BY
-            if (auto* order_by = parse_order_by_clause()) {
-                append(order_by);
-            }
+        // ORDER must be followed by BY and a sort list; `... ORDER` (or ORDER
+        // without a parseable list) previously consumed and dropped the keyword
+        // with a clean parse (silent swallow).
+        if (!current_token_ || current_token_->keyword_id != db25::Keyword::BY) {
+            error("expected BY after ORDER");
+            return;
         }
+        advance(); // consume BY
+        auto* order_by = parse_order_by_clause();
+        if (!order_by) {
+            error("expected a sort expression after ORDER BY");
+            return;
+        }
+        append(order_by);
     }
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         (current_token_->keyword_id == db25::Keyword::LIMIT)) {
         advance(); // consume LIMIT
-        if (auto* limit_clause = parse_limit_clause()) {
-            append(limit_clause);
+        // LIMIT requires an operand; `... LIMIT` alone previously consumed and
+        // dropped the keyword with a clean parse (silent swallow).
+        auto* limit_clause = parse_limit_clause();
+        if (!limit_clause) {
+            error("expected a row count after LIMIT");
+            return;
         }
+        append(limit_clause);
     }
 }
 
@@ -1010,14 +1035,21 @@ ast::ASTNode* Parser::parse_select_list() {
             item = parse_select_item();
         }
         
-        if (item) {
-            item->parent = list_node;
-            last_item->next_sibling = item;
-            last_item = item;
-            list_node->child_count++;
+        // A comma was consumed, so an item MUST follow. A dangling comma
+        // (`SELECT id, FROM users`) previously left `item` null, dropped the
+        // comma, and parsed cleanly (trailing==0) - the following clause keyword
+        // was neither an item nor counted as trailing.
+        if (!item) {
+            error("expected a select item after ',' in the SELECT list");
+            pop_context();
+            return nullptr;
         }
+        item->parent = list_node;
+        last_item->next_sibling = item;
+        last_item = item;
+        list_node->child_count++;
     }
-    
+
     pop_context();
     return list_node;
 }

@@ -560,6 +560,109 @@ ast::ASTNode* Parser::parse_data_type() {
     return type_node;
 }
 
+// Consume the optional referential-action / characteristic tail of a FOREIGN
+// KEY REFERENCES clause:
+//   [MATCH FULL|PARTIAL|SIMPLE]
+//   [ON DELETE|UPDATE <action>]...  action = NO ACTION | RESTRICT | CASCADE
+//                                          | SET NULL | SET DEFAULT
+//   [[NOT] DEFERRABLE] [INITIALLY DEFERRED|IMMEDIATE]
+// ON DELETE/UPDATE actions are recorded in semantic_flags (3 bits each:
+// 1=RESTRICT 2=CASCADE 3=SET NULL 4=SET DEFAULT; NO ACTION / absent = 0),
+// DEFERRABLE in bit 6 and INITIALLY DEFERRED in bit 7. Returns false (after
+// calling error()) only on a malformed clause; a clean stop at a
+// non-referential token returns true.
+bool Parser::consume_fk_referential_actions(ast::ASTNode* constraint) {
+    auto ci_eq = [](std::string_view a, const char* b) {
+        std::size_t n = 0;
+        for (; b[n] != '\0'; ++n) {
+            if (n >= a.size()) return false;
+            char ca = a[n];
+            if (ca >= 'a' && ca <= 'z') ca = static_cast<char>(ca - 32);
+            char cb = b[n];
+            if (cb >= 'a' && cb <= 'z') cb = static_cast<char>(cb - 32);
+            if (ca != cb) return false;
+        }
+        return n == a.size();
+    };
+    auto parse_fk_action = [&]() -> uint16_t {
+        if (!current_token_) return 0;
+        if (current_token_->keyword_id == db25::Keyword::RESTRICT) {
+            advance();
+            return 1;
+        }
+        if (current_token_->keyword_id == db25::Keyword::CASCADE) {
+            advance();
+            return 2;
+        }
+        if (current_token_->keyword_id == db25::Keyword::NO) {
+            advance();  // NO
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::ACTION) {
+                advance();
+            }
+            return 0;  // NO ACTION
+        }
+        if (current_token_->keyword_id == db25::Keyword::SET) {
+            advance();  // SET
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_NULL) {
+                advance();
+                return 3;  // SET NULL
+            }
+            if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_DEFAULT) {
+                advance();
+                return 4;  // SET DEFAULT
+            }
+            return 0;
+        }
+        return 0;
+    };
+    while (current_token_) {
+        if (ci_eq(current_token_->value, "MATCH")) {
+            advance();  // MATCH
+            if (current_token_ &&
+                (ci_eq(current_token_->value, "FULL") ||
+                 ci_eq(current_token_->value, "PARTIAL") ||
+                 ci_eq(current_token_->value, "SIMPLE"))) {
+                advance();
+            }
+        } else if (current_token_->keyword_id == db25::Keyword::ON) {
+            advance();  // ON
+            const bool is_delete =
+                current_token_ && current_token_->keyword_id == db25::Keyword::DELETE;
+            const bool is_update =
+                current_token_ && current_token_->keyword_id == db25::Keyword::UPDATE;
+            if (!is_delete && !is_update) {
+                error("expected DELETE or UPDATE after ON in a REFERENCES clause");
+                return false;
+            }
+            advance();  // DELETE / UPDATE
+            const uint16_t act = parse_fk_action();
+            constraint->semantic_flags |= static_cast<uint16_t>(
+                is_delete ? (act & 0x7) : ((act & 0x7) << 3));
+        } else if (current_token_->keyword_id == db25::Keyword::NOT && peek_token_ &&
+                   peek_token_->keyword_id == db25::Keyword::DEFERRABLE) {
+            // NOT DEFERRABLE. Only consume NOT when DEFERRABLE actually follows
+            // (one-token lookahead) - a bare NOT otherwise begins a separate
+            // NOT NULL column constraint (`a INT REFERENCES b NOT NULL`).
+            advance();  // NOT
+            advance();  // DEFERRABLE
+        } else if (current_token_->keyword_id == db25::Keyword::DEFERRABLE) {
+            advance();
+            constraint->semantic_flags |= 0x40;  // DEFERRABLE
+        } else if (ci_eq(current_token_->value, "INITIALLY")) {
+            advance();  // INITIALLY
+            if (current_token_ && ci_eq(current_token_->value, "DEFERRED")) {
+                advance();
+                constraint->semantic_flags |= 0x80;  // INITIALLY DEFERRED
+            } else if (current_token_ && ci_eq(current_token_->value, "IMMEDIATE")) {
+                advance();
+            }
+        } else {
+            break;  // not a referential-action clause; stop
+        }
+    }
+    return true;
+}
+
 // Parse column constraint (NOT NULL, PRIMARY KEY, etc.)
 ast::ASTNode* Parser::parse_column_constraint() {
     DepthGuard guard(this);
@@ -718,9 +821,18 @@ ast::ASTNode* Parser::parse_column_constraint() {
                     parenthesis_depth_--;
                 }
             }
+
+            // Referential-action / constraint-characteristic tail (MATCH,
+            // ON DELETE/UPDATE, [NOT] DEFERRABLE, INITIALLY). Previously left
+            // unconsumed, which the strict CREATE TABLE column-list check now
+            // rejects - wrongly failing valid DDL like
+            // `a INT REFERENCES b(id) ON DELETE CASCADE`.
+            if (!consume_fk_referential_actions(constraint)) {
+                return nullptr;
+            }
         }
     }
-    
+
     return constraint;
 }
 
@@ -922,6 +1034,12 @@ ast::ASTNode* Parser::parse_table_constraint() {
                     last->next_sibling = ref;
                 }
                 constraint->child_count++;
+
+                // Referential-action tail (ON DELETE/UPDATE, MATCH, DEFERRABLE),
+                // same as the column-level REFERENCES clause.
+                if (!consume_fk_referential_actions(constraint)) {
+                    return nullptr;
+                }
             }
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::UNIQUE) {
@@ -1141,12 +1259,14 @@ ast::ASTNode* Parser::parse_alter_table_full() {
     new (alter_node) ast::ASTNode(ast::NodeType::AlterTableStmt);
     alter_node->node_id = next_node_id_++;
     
-    // Get table name
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-        alter_node->primary_text = copy_to_arena(current_token_->value);
-        advance();
+    // Get table name (required).
+    if (!current_token_ || current_token_->type != tokenizer::TokenType::Identifier) {
+        error("expected a table name after ALTER TABLE");
+        return nullptr;
     }
-    
+    alter_node->primary_text = copy_to_arena(current_token_->value);
+    advance();
+
     // Parse ALTER action
     auto* action = arena_.allocate<ast::ASTNode>();
     new (action) ast::ASTNode(ast::NodeType::AlterTableAction);
@@ -1172,21 +1292,29 @@ ast::ASTNode* Parser::parse_alter_table_full() {
 
         if (is_table_constraint) {
             auto* constraint = parse_table_constraint();
-            if (constraint) {
-                constraint->parent = action;
-                action->first_child = constraint;
-                action->child_count = 1;
+            // ADD with no parseable constraint is a truncated statement; a null
+            // here previously left a childless action and a clean parse.
+            if (!constraint) {
+                error("expected a constraint definition after ADD in ALTER TABLE");
+                return nullptr;
             }
+            constraint->parent = action;
+            action->first_child = constraint;
+            action->child_count = 1;
         } else {
             if (current_token_ && current_token_->keyword_id == db25::Keyword::COLUMN) {
                 advance(); // optional COLUMN keyword
             }
             auto* column = parse_column_definition();
-            if (column) {
-                column->parent = action;
-                action->first_child = column;
-                action->child_count = 1;
+            // ADD [COLUMN] with no column definition (`ALTER TABLE t ADD`) is a
+            // truncated statement; reject instead of a silent childless action.
+            if (!column) {
+                error("expected a column definition after ADD in ALTER TABLE");
+                return nullptr;
             }
+            column->parent = action;
+            action->first_child = column;
+            action->child_count = 1;
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::DROP) {
         advance();
@@ -1197,7 +1325,14 @@ ast::ASTNode* Parser::parse_alter_table_full() {
         if (current_token_ && current_token_->keyword_id == db25::Keyword::CONSTRAINT) {
             advance(); // consume CONSTRAINT
             action->semantic_flags |= 0x20;  // DROP CONSTRAINT flag
-            if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+            // DROP CONSTRAINT requires a constraint name; `... DROP CONSTRAINT`
+            // alone previously left a childless action and a clean parse.
+            if (!current_token_ ||
+                current_token_->type != tokenizer::TokenType::Identifier) {
+                error("expected a constraint name after DROP CONSTRAINT");
+                return nullptr;
+            }
+            {
                 auto* nm = arena_.allocate<ast::ASTNode>();
                 new (nm) ast::ASTNode(ast::NodeType::Identifier);
                 nm->node_id = next_node_id_++;
@@ -1222,8 +1357,14 @@ ast::ASTNode* Parser::parse_alter_table_full() {
             advance(); // optional COLUMN keyword
         }
 
-        // Get column name
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+        // Get column name. DROP [COLUMN] requires one; `ALTER TABLE t DROP`
+        // alone previously left a childless action and a clean parse.
+        if (!current_token_ ||
+            current_token_->type != tokenizer::TokenType::Identifier) {
+            error("expected a column name after DROP in ALTER TABLE");
+            return nullptr;
+        }
+        {
             auto* col = arena_.allocate<ast::ASTNode>();
             new (col) ast::ASTNode(ast::NodeType::Identifier);
             col->node_id = next_node_id_++;
@@ -1232,7 +1373,7 @@ ast::ASTNode* Parser::parse_alter_table_full() {
             action->first_child = col;
             action->child_count = 1;
             advance();
-            
+
             // Handle CASCADE/RESTRICT
             if (current_token_ && current_token_->keyword_id == db25::Keyword::CASCADE) {
                 action->semantic_flags |= 0x01;  // CASCADE flag
@@ -1249,9 +1390,15 @@ ast::ASTNode* Parser::parse_alter_table_full() {
         if (current_token_ && current_token_->keyword_id == db25::Keyword::COLUMN) {
             advance(); // optional COLUMN keyword
         }
-        
-        // Get column name
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
+
+        // Get column name. ALTER [COLUMN] requires one; `ALTER TABLE t ALTER`
+        // alone previously left a childless action and a clean parse.
+        if (!current_token_ ||
+            current_token_->type != tokenizer::TokenType::Identifier) {
+            error("expected a column name after ALTER in ALTER TABLE");
+            return nullptr;
+        }
+        {
             auto* col = arena_.allocate<ast::ASTNode>();
             new (col) ast::ASTNode(ast::NodeType::Identifier);
             col->node_id = next_node_id_++;
@@ -1260,7 +1407,7 @@ ast::ASTNode* Parser::parse_alter_table_full() {
             action->first_child = col;
             action->child_count = 1;
             advance();
-            
+
             // Parse alteration (SET DEFAULT, DROP DEFAULT, TYPE, etc.)
             if (current_token_ && current_token_->keyword_id == db25::Keyword::SET) {
                 advance();
@@ -1321,24 +1468,65 @@ ast::ASTNode* Parser::parse_alter_table_full() {
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::RENAME) {
         advance();
         action->primary_text = copy_to_arena("RENAME");
-        
-        if (current_token_ && current_token_->keyword_id == db25::Keyword::TO) {
+
+        auto attach_ident = [&](const char* what) -> ast::ASTNode* {
+            if (!current_token_ ||
+                current_token_->type != tokenizer::TokenType::Identifier) {
+                error(what);
+                return nullptr;
+            }
+            auto* nm = arena_.allocate<ast::ASTNode>();
+            new (nm) ast::ASTNode(ast::NodeType::Identifier);
+            nm->node_id = next_node_id_++;
+            nm->primary_text = copy_to_arena(current_token_->value);
+            nm->parent = action;
+            advance();
+            return nm;
+        };
+
+        // Optional COLUMN keyword: `RENAME COLUMN <old> TO <new>`.
+        const bool rename_column =
+            current_token_ && current_token_->keyword_id == db25::Keyword::COLUMN;
+        if (rename_column) {
             advance();
         }
-        
-        // Get new name
-        if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier) {
-            auto* new_name = arena_.allocate<ast::ASTNode>();
-            new (new_name) ast::ASTNode(ast::NodeType::Identifier);
-            new_name->node_id = next_node_id_++;
-            new_name->primary_text = copy_to_arena(current_token_->value);
-            new_name->parent = action;
+
+        if (!rename_column && current_token_ &&
+            current_token_->keyword_id == db25::Keyword::TO) {
+            // RENAME TO <new_table>.
+            advance();
+            ast::ASTNode* new_name = attach_ident("expected a new table name after RENAME TO");
+            if (!new_name) return nullptr;
             action->first_child = new_name;
             action->child_count = 1;
-            advance();
+        } else {
+            // RENAME [COLUMN] <old> TO <new>. `ALTER TABLE t RENAME` with no
+            // operand previously left a childless action and a clean parse.
+            ast::ASTNode* old_name = attach_ident(
+                "expected a column name or TO after RENAME in ALTER TABLE");
+            if (!old_name) return nullptr;
+            action->first_child = old_name;
+            action->child_count = 1;
+            if (!current_token_ || current_token_->keyword_id != db25::Keyword::TO) {
+                error("expected TO after the column name in ALTER TABLE RENAME");
+                return nullptr;
+            }
+            advance();  // consume TO
+            ast::ASTNode* new_name = attach_ident(
+                "expected a new column name after TO in ALTER TABLE RENAME");
+            if (!new_name) return nullptr;
+            old_name->next_sibling = new_name;
+            action->child_count = 2;
         }
+    } else {
+        // No recognized ALTER action keyword (ADD / DROP / ALTER / RENAME).
+        // `ALTER TABLE t` alone previously produced a childless action node and
+        // a clean parse of an incomplete statement.
+        error("expected an ALTER action (ADD / DROP / ALTER / RENAME) "
+              "after the table name");
+        return nullptr;
     }
-    
+
     return alter_node;
 }
 

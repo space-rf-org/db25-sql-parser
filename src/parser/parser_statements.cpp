@@ -244,7 +244,14 @@ ast::ASTNode* Parser::parse_values_stmt() {
                 advance(); // consume )
                 if (parenthesis_depth_ > 0) parenthesis_depth_--;
             }
-            
+
+            // A row value constructor requires at least one value; an empty row
+            // `VALUES ()` previously appended a childless row with a clean parse.
+            if (row_node->child_count == 0) {
+                error("expected at least one value in the VALUES row");
+                return nullptr;
+            }
+
             // Add row to values clause
             if (!first_row) {
                 first_row = row_node;
@@ -265,7 +272,14 @@ ast::ASTNode* Parser::parse_values_stmt() {
             break;
         }
     } while (true);
-    
+
+    // VALUES requires at least one row; a bare `VALUES` with no `(...)` row
+    // previously produced a childless ValuesClause and a clean parse.
+    if (values_clause->child_count == 0) {
+        error("expected at least one row after VALUES");
+        return nullptr;
+    }
+
     values_node->first_child = values_clause;
     values_node->child_count = 1;
     
