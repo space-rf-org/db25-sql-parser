@@ -443,58 +443,17 @@ ast::ASTNode* Parser::parse_update_stmt() {
         }
     }
     
-    // Optional RETURNING clause (PostgreSQL extension)
+    // Optional RETURNING clause (PostgreSQL extension). Parse each item as a
+    // full expression via the shared helper (as INSERT does). The previous
+    // inline loop used parse_column_ref(), which parsed only a leading bare
+    // column and dropped the rest: `RETURNING id, k+1, name` truncated to
+    // [id, k] (the `+1` desynced the comma loop, dropping `name`), silently
+    // losing RETURNING output columns.
     if (current_token_ && current_token_->keyword_id == db25::Keyword::RETURNING) {
-        advance();  // consume RETURNING
-        
-        auto* returning_clause = arena_.allocate<ast::ASTNode>();
-        new (returning_clause) ast::ASTNode(ast::NodeType::ReturningClause);
-        returning_clause->node_id = next_node_id_++;
-        
-        // Parse column list or *
-        if (current_token_ && current_token_->value == "*") {
-            auto* star = arena_.allocate<ast::ASTNode>();
-            new (star) ast::ASTNode(ast::NodeType::Star);
-            star->node_id = next_node_id_++;
-            star->parent = returning_clause;
-            returning_clause->first_child = star;
-            returning_clause->child_count = 1;
-            advance();
-        } else {
-            // Parse column list
-            ast::ASTNode* first_col = nullptr;
-            ast::ASTNode* last_col = nullptr;
-            
-            while (current_token_) {
-                auto* col = parse_column_ref();
-                if (!col) break;
-                
-                col->parent = returning_clause;
-                if (!first_col) {
-                    first_col = col;
-                    returning_clause->first_child = first_col;
-                } else {
-                    last_col->next_sibling = col;
-                }
-                last_col = col;
-                returning_clause->child_count++;
-                
-                if (current_token_ && current_token_->value == ",") {
-                    advance();
-                } else {
-                    break;
-                }
-            }
+        auto* returning_clause = parse_returning_clause();
+        if (!returning_clause) {
+            return nullptr;  // helper already emitted the error
         }
-
-        // RETURNING requires at least one output; a dangling RETURNING (or one
-        // whose first item fails to parse) previously yielded an empty clause
-        // and a clean parse.
-        if (returning_clause->child_count == 0) {
-            error("expected an output expression or '*' after RETURNING");
-            return nullptr;
-        }
-
         returning_clause->parent = update_node;
         last_child->next_sibling = returning_clause;
         update_node->child_count++;
@@ -585,57 +544,15 @@ ast::ASTNode* Parser::parse_delete_stmt() {
         }
     }
     
-    // Optional RETURNING clause (PostgreSQL extension)
+    // Optional RETURNING clause (PostgreSQL extension). Parse each item as a
+    // full expression via the shared helper (as INSERT does); the previous
+    // inline parse_column_ref() loop truncated expression items and dropped
+    // list items after the first non-bare-column one.
     if (current_token_ && current_token_->keyword_id == db25::Keyword::RETURNING) {
-        advance();  // consume RETURNING
-        
-        auto* returning_clause = arena_.allocate<ast::ASTNode>();
-        new (returning_clause) ast::ASTNode(ast::NodeType::ReturningClause);
-        returning_clause->node_id = next_node_id_++;
-        
-        // Parse column list or *
-        if (current_token_ && current_token_->value == "*") {
-            auto* star = arena_.allocate<ast::ASTNode>();
-            new (star) ast::ASTNode(ast::NodeType::Star);
-            star->node_id = next_node_id_++;
-            star->parent = returning_clause;
-            returning_clause->first_child = star;
-            returning_clause->child_count = 1;
-            advance();
-        } else {
-            // Parse column list
-            ast::ASTNode* first_col = nullptr;
-            ast::ASTNode* last_col = nullptr;
-            
-            while (current_token_) {
-                auto* col = parse_column_ref();
-                if (!col) break;
-                
-                col->parent = returning_clause;
-                if (!first_col) {
-                    first_col = col;
-                    returning_clause->first_child = first_col;
-                } else {
-                    last_col->next_sibling = col;
-                }
-                last_col = col;
-                returning_clause->child_count++;
-                
-                if (current_token_ && current_token_->value == ",") {
-                    advance();
-                } else {
-                    break;
-                }
-            }
+        auto* returning_clause = parse_returning_clause();
+        if (!returning_clause) {
+            return nullptr;  // helper already emitted the error
         }
-
-        // RETURNING requires at least one output; reject a dangling RETURNING
-        // (empty clause) rather than accept a truncated statement.
-        if (returning_clause->child_count == 0) {
-            error("expected an output expression or '*' after RETURNING");
-            return nullptr;
-        }
-
         returning_clause->parent = delete_node;
         last_child->next_sibling = returning_clause;
         delete_node->child_count++;

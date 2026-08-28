@@ -197,3 +197,58 @@ TEST_F(DMLParseTest, IntegerLiteralTyping) {
     EXPECT_EQ(select_list->first_child->node_type, NodeType::IntegerLiteral);
     EXPECT_EQ(select_list->first_child->primary_text, "1");
 }
+
+// ============================================================================
+// UPDATE / DELETE RETURNING - full expression items (pass-29 audit)
+// ============================================================================
+// The UPDATE and DELETE RETURNING paths parsed each item with parse_column_ref,
+// which read only a leading bare column: `RETURNING id, k+1, name` truncated to
+// [id, k] (the `+1` desynced the comma loop, dropping `name`), silently losing
+// output columns. Both paths now use the shared full-expression helper.
+
+TEST_F(DMLParseTest, UpdateReturningExpressionItemsNotTruncated) {
+    auto* ast = parse("UPDATE t SET x = 1 WHERE id = 1 RETURNING id, k + 1, name");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(parser.trailing_token_count(), 0u);
+    auto* ret = find_child(ast, NodeType::ReturningClause);
+    ASSERT_NE(ret, nullptr);
+    EXPECT_EQ(ret->child_count, 3u) << "RETURNING must keep all three items";
+}
+
+TEST_F(DMLParseTest, DeleteReturningExpressionItemsNotTruncated) {
+    auto* ast = parse("DELETE FROM t WHERE id = 1 RETURNING id, k + 1, name");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(parser.trailing_token_count(), 0u);
+    auto* ret = find_child(ast, NodeType::ReturningClause);
+    ASSERT_NE(ret, nullptr);
+    EXPECT_EQ(ret->child_count, 3u) << "RETURNING must keep all three items";
+}
+
+TEST_F(DMLParseTest, UpdateReturningSingleExpression) {
+    auto* ast = parse("UPDATE t SET x = 1 RETURNING id + 1");
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(parser.trailing_token_count(), 0u);
+    auto* ret = find_child(ast, NodeType::ReturningClause);
+    ASSERT_NE(ret, nullptr);
+    EXPECT_EQ(ret->child_count, 1u);
+}
+
+TEST_F(DMLParseTest, DeleteReturningStarStillWorks) {
+    auto* ast = parse("DELETE FROM t RETURNING *");
+    ASSERT_NE(ast, nullptr);
+    auto* ret = find_child(ast, NodeType::ReturningClause);
+    ASSERT_NE(ret, nullptr);
+    EXPECT_EQ(ret->child_count, 1u);
+    ASSERT_NE(ret->first_child, nullptr);
+    EXPECT_EQ(ret->first_child->node_type, NodeType::Star);
+}
+
+// A dangling RETURNING keyword must still be rejected on both paths.
+TEST_F(DMLParseTest, UpdateDanglingReturningRejected) {
+    EXPECT_EQ(parse("UPDATE t SET x = 1 RETURNING"), nullptr);
+}
+
+TEST_F(DMLParseTest, DeleteDanglingReturningRejected) {
+    parser.reset();
+    EXPECT_EQ(parse("DELETE FROM t RETURNING"), nullptr);
+}
