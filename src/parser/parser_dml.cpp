@@ -135,7 +135,13 @@ ast::ASTNode* Parser::parse_insert_stmt() {
         }
     }
     
-    // Now parse VALUES or SELECT or DEFAULT VALUES
+    // Now parse VALUES or SELECT or DEFAULT VALUES. An INSERT requires exactly
+    // one of these data sources; `source_added` tracks that a real one was
+    // parsed so a source-less INSERT (`INSERT INTO t`, `INSERT INTO t (a,b)`,
+    // a rowless `INSERT INTO t VALUES`, an empty `INSERT INTO t SELECT`, or a
+    // bare `INSERT INTO t DEFAULT`) is rejected below rather than silently
+    // producing a statement with nothing to insert.
+    bool source_added = false;
     if (current_token_ && current_token_->keyword_id == db25::Keyword::VALUES) {
         advance();  // consume VALUES
         
@@ -209,11 +215,18 @@ ast::ASTNode* Parser::parse_insert_stmt() {
             }
         }
         
+        // VALUES requires at least one row: `INSERT INTO t VALUES` (no `(...)`)
+        // produced a childless ValuesClause.
+        if (values_node->child_count == 0) {
+            error("expected at least one row after VALUES");
+            return nullptr;
+        }
         values_node->parent = insert_node;
         last_child->next_sibling = values_node;
         last_child = values_node;
         insert_node->child_count++;
-        
+        source_added = true;
+
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::SELECT) {
         // INSERT INTO ... SELECT
         auto* select_stmt = parse_select_stmt();
@@ -222,9 +235,12 @@ ast::ASTNode* Parser::parse_insert_stmt() {
             last_child->next_sibling = select_stmt;
             last_child = select_stmt;
             insert_node->child_count++;
+            source_added = true;
         }
     } else if (current_token_ && current_token_->keyword_id == db25::Keyword::KW_DEFAULT) {
         advance();  // consume DEFAULT
+        // DEFAULT must be followed by VALUES; a bare `INSERT INTO t DEFAULT`
+        // previously consumed and dropped the DEFAULT with no source.
         if (current_token_ && current_token_->keyword_id == db25::Keyword::VALUES) {
             advance();  // consume VALUES
             // Create a marker node for DEFAULT VALUES
@@ -236,9 +252,16 @@ ast::ASTNode* Parser::parse_insert_stmt() {
             last_child->next_sibling = default_values;
             last_child = default_values;
             insert_node->child_count++;
+            source_added = true;
         }
     }
-    
+
+    // An INSERT with no data source is a syntax error.
+    if (!source_added) {
+        error("INSERT requires VALUES, a query, or DEFAULT VALUES");
+        return nullptr;
+    }
+
     // Optional ON CONFLICT clause (for UPSERT). Delegate to the fully
     // implemented helper, which parses the conflict target column list and the
     // DO UPDATE SET assignments (the previous inline version stubbed both out).

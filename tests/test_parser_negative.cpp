@@ -412,6 +412,66 @@ TEST(ParserNegativeTest, ValidCastExtractNullsEscapeInStillParse) {
     EXPECT_TRUE(parser.parse("SELECT a IN (SELECT b FROM t) FROM u").has_value());
 }
 
+// More missing-required-source sites that silently accepted a mis-structured
+// statement (all trailing_token_count==0 silent accepts): a FROM keyword with no
+// table reference before a clause boundary, an INSERT with no data source, empty
+// CTE / derived-table / scalar-subquery bodies, column-constraint keywords with
+// no operand, and DROP / TRUNCATE with no object name.
+TEST(ParserNegativeTest, MissingSourceElementsRejected) {
+    // FROM with no table reference before a clause boundary / EOF.
+    expect_parse_error("SELECT a FROM ORDER BY 1");
+    expect_parse_error("SELECT a FROM WHERE b = 1");
+    expect_parse_error("SELECT 1 FROM");
+    expect_parse_error("SELECT a FROM GROUP BY b");
+    // INSERT with no data source.
+    expect_parse_error("INSERT INTO t (a, b)");
+    expect_parse_error("INSERT INTO t");
+    expect_parse_error("INSERT INTO t VALUES");
+    expect_parse_error("INSERT INTO t DEFAULT");
+    expect_parse_error("INSERT INTO t SELECT");
+    // Empty CTE / derived-table / scalar-subquery bodies.
+    expect_parse_error("WITH c AS () SELECT * FROM c");
+    expect_parse_error("SELECT * FROM (SELECT) x");
+    expect_parse_error("SELECT * FROM t WHERE a = (SELECT)");
+    // Column-constraint keywords with no operand.
+    expect_parse_error("CREATE TABLE t (a INT CHECK)");
+    expect_parse_error("CREATE TABLE t (a INT DEFAULT)");
+    expect_parse_error("CREATE TABLE t (a INT REFERENCES)");
+    // DROP / TRUNCATE with no object name.
+    expect_parse_error("DROP TABLE");
+    expect_parse_error("DROP");
+    expect_parse_error("TRUNCATE");
+    expect_parse_error("TRUNCATE TABLE");
+}
+
+// Guard: the well-formed variants of all of the above still parse.
+TEST(ParserNegativeTest, ValidSourceElementsStillParse) {
+    Parser parser;
+    EXPECT_TRUE(parser.parse("SELECT a FROM users ORDER BY a").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("INSERT INTO t (a, b) VALUES (1, 2)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("INSERT INTO t DEFAULT VALUES").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("INSERT INTO t SELECT * FROM u").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("WITH c AS (SELECT 1) SELECT * FROM c").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM (SELECT 1) x").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("SELECT * FROM t WHERE a = (SELECT 1)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("CREATE TABLE t (a INT CHECK (a > 0))").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("CREATE TABLE t (a INT DEFAULT 0)").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("CREATE TABLE t (a INT REFERENCES u (id))").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("DROP TABLE users").has_value());
+    parser.reset();
+    EXPECT_TRUE(parser.parse("TRUNCATE TABLE users").has_value());
+}
+
 // Guard: well-formed CASE expressions (searched and simple, with/without ELSE)
 // still parse.
 TEST(ParserNegativeTest, ValidCaseExpressionsStillParse) {

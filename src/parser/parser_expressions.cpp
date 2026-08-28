@@ -300,18 +300,23 @@ ast::ASTNode* Parser::parse_primary_expression() {
             // Parse the query body (SELECT / VALUES / WITH), folding any set-op tail.
             auto* select_stmt = parse_query_body();
             pop_context();
-            if (select_stmt) {
-                select_stmt->parent = subquery_node;
-                subquery_node->first_child = select_stmt;
-                subquery_node->child_count = 1;
+            // A parenthesized subquery requires a query body; an empty
+            // `(SELECT)` in expression position (`WHERE a = (SELECT)`)
+            // previously produced a childless Subquery and a clean parse.
+            if (!select_stmt) {
+                error("expected a query expression in the parenthesized subquery");
+                return nullptr;
             }
-            
+            select_stmt->parent = subquery_node;
+            subquery_node->first_child = select_stmt;
+            subquery_node->child_count = 1;
+
             // Consume closing ')'
             if (current_token_ && current_token_->value == ")") {
                 if (parenthesis_depth_ > 0) parenthesis_depth_--;
                 advance();
             }
-            
+
             return subquery_node;
         } else {
             // Grouped expression, or a row/tuple constructor "( expr, expr, ... )"

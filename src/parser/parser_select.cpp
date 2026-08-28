@@ -200,17 +200,22 @@ ast::ASTNode* Parser::parse_with_statement() {
         // query-body parser so it matches every other query-block site; the
         // enclosing `(` was already consumed above and the `)` is consumed below.
         ast::ASTNode* cte_query = parse_query_body();
-        
-        if (cte_query) {
-            cte_query->parent = cte_def;
-            if (cte_def->first_child) {
-                // Already has column list
-                cte_def->first_child->next_sibling = cte_query;
-                cte_def->child_count++;
-            } else {
-                cte_def->first_child = cte_query;
-                cte_def->child_count = 1;
-            }
+
+        // A CTE definition requires a query expression as its body; an empty
+        // `AS ()` previously produced a childless CTEDefinition and a clean
+        // parse (top-level empty SELECT is rejected, so this was inconsistent).
+        if (!cte_query) {
+            error("expected a query expression in the CTE body");
+            return nullptr;
+        }
+        cte_query->parent = cte_def;
+        if (cte_def->first_child) {
+            // Already has column list
+            cte_def->first_child->next_sibling = cte_query;
+            cte_def->child_count++;
+        } else {
+            cte_def->first_child = cte_query;
+            cte_def->child_count = 1;
         }
         
         // Consume closing paren
@@ -353,9 +358,38 @@ ast::ASTNode* Parser::parse_select_stmt() {
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::FROM) {
         advance(); // consume FROM
-        
+
         auto* from_clause = parse_from_clause();
-        if (from_clause) {
+        if (!from_clause) {
+            // FROM keyword present but no table reference followed. Reject only
+            // when the next token clearly cannot begin a table reference - EOF or
+            // a clause-boundary keyword (`SELECT a FROM ORDER BY 1`, `... FROM
+            // WHERE ...`, dangling `SELECT 1 FROM`). The keyword was consumed, so
+            // silently dropping it mis-structures the statement (WHERE/ORDER BY
+            // attaching to a from-less SELECT) and changes star-expansion.
+            // A non-clause keyword (`FROM table`) is left to the parser's
+            // existing keyword-as-table-name leniency, unchanged.
+            const bool at_clause_boundary =
+                current_token_ == nullptr ||
+                current_token_->type == tokenizer::TokenType::EndOfFile ||
+                (current_token_->type == tokenizer::TokenType::Keyword &&
+                 (current_token_->keyword_id == db25::Keyword::WHERE ||
+                  current_token_->keyword_id == db25::Keyword::GROUP ||
+                  current_token_->keyword_id == db25::Keyword::HAVING ||
+                  current_token_->keyword_id == db25::Keyword::ORDER ||
+                  current_token_->keyword_id == db25::Keyword::LIMIT ||
+                  current_token_->keyword_id == db25::Keyword::OFFSET ||
+                  current_token_->keyword_id == db25::Keyword::UNION ||
+                  current_token_->keyword_id == db25::Keyword::INTERSECT ||
+                  current_token_->keyword_id == db25::Keyword::EXCEPT ||
+                  current_token_->keyword_id == db25::Keyword::WINDOW ||
+                  current_token_->keyword_id == db25::Keyword::FETCH ||
+                  current_token_->keyword_id == db25::Keyword::RETURNING));
+            if (at_clause_boundary) {
+                error("expected a table reference after FROM");
+                return nullptr;
+            }
+        } else {
             from_clause->parent = select_node;
             // Add as sibling to select_list
             select_list->next_sibling = from_clause;
@@ -1906,11 +1940,17 @@ ast::ASTNode* Parser::parse_table_reference() {
             // parse_values_stmt left `UNION ...` unconsumed and dropped the item).
             ast::ASTNode* inner = parse_query_body();
             pop_context();
-            if (inner) {
-                inner->parent = subquery_node;
-                subquery_node->first_child = inner;
-                subquery_node->child_count = 1;
+            // A derived table requires a query body; an empty `(SELECT)` / `()`
+            // previously produced a childless Subquery table source and a clean
+            // parse, which breaks downstream star-expansion and column
+            // resolution. Reject it (top-level empty SELECT is rejected too).
+            if (!inner) {
+                error("expected a query expression in the derived-table subquery");
+                return nullptr;
             }
+            inner->parent = subquery_node;
+            subquery_node->first_child = inner;
+            subquery_node->child_count = 1;
 
             // Consume closing ')'
             if (current_token_ && current_token_->value == ")") {
