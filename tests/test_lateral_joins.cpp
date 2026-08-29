@@ -120,14 +120,33 @@ TEST(LateralJoins, NonLateralDerivedTableStaysSubquery) {
     EXPECT_EQ(find_node(root, NodeType::LateralJoin), nullptr);
 }
 
-// Outer LATERAL joins null-extend a side, which the LateralJoin node does not
-// model yet: reject rather than silently drop the nullability.
-TEST(LateralJoins, OuterJoinLateralRejected) {
-    expect_parse_error("SELECT * FROM t1 LEFT JOIN LATERAL (SELECT t1.x) s ON true");
+// LEFT [OUTER] JOIN LATERAL is legal: the RHS is correlated AND null-extended.
+// It parses to a LateralJoin whose primary_text keeps the LEFT qualifier so the
+// analyzer / binder apply the null-extension.
+TEST(LateralJoins, LeftJoinLateralAccepted) {
+    Parser parser;
+    for (const char* sql : {
+             "SELECT * FROM t1 LEFT JOIN LATERAL (SELECT t1.x AS z) s ON true",
+             "SELECT * FROM t1 LEFT OUTER JOIN LATERAL (SELECT t1.x AS z) s ON true",
+         }) {
+        const auto* root = parse_ok(parser, sql);
+        ASSERT_NE(root, nullptr) << sql;
+        const auto* lat = find_node(root, NodeType::LateralJoin);
+        ASSERT_NE(lat, nullptr) << sql;
+        EXPECT_TRUE(is_lateral(lat)) << sql;
+        EXPECT_NE(std::string(lat->primary_text).find("LEFT"), std::string::npos)
+            << "LEFT qualifier preserved in primary_text: " << sql;
+        parser.reset();
+    }
+}
+
+// RIGHT / FULL JOIN LATERAL is a circular dependency SQL forbids: the left side
+// would be null-extended from a right input that itself depends on the left.
+TEST(LateralJoins, RightFullJoinLateralRejected) {
     expect_parse_error("SELECT * FROM t1 RIGHT JOIN LATERAL (SELECT t1.x) s ON true");
     expect_parse_error("SELECT * FROM t1 FULL JOIN LATERAL (SELECT t1.x) s ON true");
     expect_parse_error(
-        "SELECT * FROM t1 LEFT OUTER JOIN LATERAL (SELECT t1.x) s ON true");
+        "SELECT * FROM t1 RIGHT OUTER JOIN LATERAL (SELECT t1.x) s ON true");
 }
 
 TEST(LateralJoins, NaturalJoinLateralRejected) {

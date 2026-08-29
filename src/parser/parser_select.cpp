@@ -1185,11 +1185,12 @@ ast::ASTNode* Parser::parse_join_clause() {
     // every other qualified join requires one.
     bool is_natural = false;
     bool is_cross = false;
-    // An outer join (LEFT / RIGHT / FULL) null-extends a side. Tracked so a
-    // `LEFT JOIN LATERAL` etc. can be rejected: the LateralJoin node type does
-    // not yet carry outer-join nullability, so accepting it would silently drop
-    // the null-extension.
-    bool is_outer = false;
+    // RIGHT / FULL null-extend the LEFT side from the right input. LATERAL's RHS
+    // is evaluated per left row and references the left, so RIGHT/FULL JOIN
+    // LATERAL is a circular dependency SQL forbids ("RIGHT and FULL JOIN are not
+    // supported with LATERAL"); tracked so those combinations are rejected while
+    // LEFT / INNER / CROSS JOIN LATERAL are accepted.
+    bool is_right_or_full = false;
 
     // Optional NATURAL prefix: NATURAL [INNER | LEFT [OUTER] | RIGHT [OUTER] |
     // FULL [OUTER]] JOIN. A NATURAL join carries no ON / USING clause; its join
@@ -1213,10 +1214,9 @@ ast::ASTNode* Parser::parse_join_clause() {
             if (kw == "CROSS" || kw == "cross") {
                 is_cross = true;
             }
-            if (kw == "LEFT" || kw == "left" ||
-                kw == "RIGHT" || kw == "right" ||
+            if (kw == "RIGHT" || kw == "right" ||
                 kw == "FULL" || kw == "full") {
-                is_outer = true;
+                is_right_or_full = true;
             }
             if (!join_type.empty()) {
                 join_type += " ";
@@ -1248,17 +1248,21 @@ ast::ASTNode* Parser::parse_join_clause() {
         join_node->primary_text = copy_to_arena(join_type);
     }
 
-    // LATERAL modifier: `[INNER] JOIN LATERAL (subquery) alias` /
+    // LATERAL modifier: `[INNER] JOIN LATERAL (subquery) alias`,
+    // `LEFT [OUTER] JOIN LATERAL (subquery) alias`, or
     // `CROSS JOIN LATERAL (subquery) alias`. The right derived table is evaluated
     // per left row and may reference the left input's columns. Record it as a
     // LateralJoin node so the analyzer grants the RHS sibling visibility and the
-    // binder resolves the correlation. NATURAL and outer (LEFT/RIGHT/FULL) joins
-    // additionally merge or null-extend a side; the LateralJoin node does not
-    // model that yet, so reject those combinations rather than silently drop it.
+    // binder resolves the correlation; the join qualifier stays in primary_text
+    // ("LEFT JOIN" etc.) so the null-extension side is preserved (LEFT JOIN
+    // LATERAL null-extends its RHS). RIGHT/FULL JOIN LATERAL is a circular
+    // dependency SQL forbids, and NATURAL's common-column merge does not compose
+    // with a correlated derived table, so both are rejected.
     if (current_token_ && current_token_->type == tokenizer::TokenType::Keyword &&
         current_token_->keyword_id == db25::Keyword::LATERAL) {
-        if (is_outer || is_natural) {
-            error("LATERAL is only supported with [INNER] JOIN and CROSS JOIN");
+        if (is_right_or_full || is_natural) {
+            error("LATERAL is only supported with [INNER] JOIN, "
+                  "LEFT JOIN and CROSS JOIN");
             return join_node;
         }
         advance();  // consume LATERAL

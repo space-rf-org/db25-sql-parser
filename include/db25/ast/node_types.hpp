@@ -259,7 +259,8 @@ enum class JoinType : uint8_t {
     Right,
     Full,
     Cross,
-    Lateral
+    Lateral,      // comma / [INNER] JOIN / CROSS JOIN LATERAL: no null-extension
+    LeftLateral   // LEFT [OUTER] JOIN LATERAL: RHS null-extended, still correlated
 };
 
 /**
