@@ -68,7 +68,6 @@ TEST_F(ArenaBasicTest, MultipleSmallAllocations) {
     auto last = std::unique(ptrs.begin(), ptrs.end());
     EXPECT_EQ(last, ptrs.end()) << "Duplicate pointers detected";
     
-    /// AMLALE: This has been added per arena.cpp additions.
     EXPECT_EQ(arena->total_used(), count * 8);
 }
 
