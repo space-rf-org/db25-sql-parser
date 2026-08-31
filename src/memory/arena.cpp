@@ -38,6 +38,10 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>   // std::aligned_alloc, std::free
+#ifdef _WIN32
+#include <malloc.h>  // _aligned_malloc, _aligned_free
+#endif
 
 namespace db25 {
 
