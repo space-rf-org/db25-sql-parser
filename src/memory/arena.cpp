@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2024 Space-RF.org
  * Copyright (c) 2024 Chiradip Mandal
+ * Copyright (c) 2026 Amlal El Mahrouss (amlal@nekernel.org)
  * 
  * DB25 Arena Allocator - High Performance Memory Management for SQL Parser
  * 
@@ -39,30 +40,63 @@
 #include <cassert>
 #include <cstdint>
 
+#ifdef __linux__
+#include <stdlib.h>
+#endif
+
 namespace db25 {
+
+namespace detail {
+
+    static constexpr size_t BLOCK_METADATA_HEADER_END = 3; // 0: Magic, 1: Size, 2: Pad
+
+    /// @note AMLALE: This could be expanded with custom pool allocators in mind.
+    static uint8_t* db25i_alloc_data(size_t sz) {
+        if (!sz) return nullptr;
+
+#ifdef _WIN32
+        auto ret = static_cast<uint8_t*>(_aligned_malloc(sz, Arena::CACHE_LINE_SIZE));
+#else
+        auto ret = static_cast<uint8_t*>(std::aligned_alloc(Arena::CACHE_LINE_SIZE, sz));
+#endif
+
+#ifdef _DEBUG
+        assert(ret);
+#endif
+
+        if (!ret) return nullptr;
+        return ret;
+    }
+
+    /// @note AMLALE: This could be expanded with custom pool allocators in mind.
+    static void dbs25i_free_data(void* data) {
+#ifdef _DEBUG
+        assert(data);
+#endif
+
+        if (data == nullptr) return;
+
+#ifdef _WIN32
+        ::_aligned_free(data);
+#else
+        ::free(data);
+#endif
+    }
+
+}
 
 // Block implementation
 Arena::Block::Block(const size_t sz) 
     : data(nullptr), size(sz), used(0) {
     // Use aligned allocation for cache efficiency
-    #ifdef _WIN32
-        data = static_cast<uint8_t*>(_aligned_malloc(sz, Arena::CACHE_LINE_SIZE));
-    #else
-        data = static_cast<uint8_t*>(std::aligned_alloc(Arena::CACHE_LINE_SIZE, sz));
-    #endif
+    data = detail::db25i_alloc_data(sz);
     
     // Return nullptr on allocation failure (no exceptions per project design)
     // Caller must check for nullptr
 }
 
 Arena::Block::~Block() {
-    if (data) {
-        #ifdef _WIN32
-            _aligned_free(data);
-        #else
-            std::free(data);
-        #endif
-    }
+    detail::dbs25i_free_data(data);
 }
 
 Arena::Block::Block(Block&& other) noexcept
@@ -74,13 +108,8 @@ Arena::Block::Block(Block&& other) noexcept
 
 Arena::Block& Arena::Block::operator=(Block&& other) noexcept {
     if (this != &other) {
-        if (data) {
-            #ifdef _WIN32
-                _aligned_free(data);
-            #else
-                std::free(data);
-            #endif
-        }
+        detail::dbs25i_free_data(data);
+
         data = other.data;
         size = other.size;
         used = other.used;
