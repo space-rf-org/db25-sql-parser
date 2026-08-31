@@ -69,7 +69,7 @@ namespace detail {
     }
 
     /// @note AMLALE: This could be expanded with custom pool allocators in mind.
-    static void dbs25i_free_data(void* data) {
+    static void db25i_free_data(void* data) {
 #ifdef _DEBUG
         assert(data);
 #endif
@@ -96,7 +96,7 @@ Arena::Block::Block(const size_t sz)
 }
 
 Arena::Block::~Block() {
-    detail::dbs25i_free_data(data);
+    detail::db25i_free_data(data);
 }
 
 Arena::Block::Block(Block&& other) noexcept
@@ -108,7 +108,7 @@ Arena::Block::Block(Block&& other) noexcept
 
 Arena::Block& Arena::Block::operator=(Block&& other) noexcept {
     if (this != &other) {
-        detail::dbs25i_free_data(data);
+        detail::db25i_free_data(data);
 
         data = other.data;
         size = other.size;
