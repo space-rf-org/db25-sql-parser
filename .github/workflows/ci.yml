@@ -80,3 +80,32 @@ jobs:
         env:
           UBSAN_OPTIONS: print_stacktrace=1
         run: ctest --output-on-failure -E "${EXCLUDE_TESTS}"
+
+  falsifiability:
+    name: falsifiability gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
+
+      # A gate that has never been seen to fail is not known to be a gate. This
+      # injects a comment edit, which no assertion can detect, and requires the
+      # gate to report it as surviving.
+      - name: Self-test (the gate must be able to fail)
+        run: python3 tools/falsifiability.py --self-test --build-dir build
+
+      # A parser is quietly wrong in two ways: it builds the wrong TREE for input
+      # it accepts, and it accepts input it should refuse. Precedence is the
+      # first, the depth guard the second, and both are invisible to a test that
+      # only asks "did it parse".
+      - name: Falsifiability gate
+        run: python3 tools/falsifiability.py --build-dir build
