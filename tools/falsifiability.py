@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """The falsifiability gate for the DB25 SQL parser.
 
-WHY THIS EXISTS. Every increment in this repo has claimed "all mutations killed"
-in its commit message, and every one of those claims was a HAND-RUN act: edit the
+WHY THIS EXISTS. Fourteen of this repo's 246 commits claim in their message that
+a mutation was killed, and every one of those claims was a HAND-RUN act: edit the
 source, rebuild, watch a test fail, put the source back, write it down. That
 makes the claim true on the day and unenforceable thereafter. Nothing stops a
 later change from weakening the test that did the killing, and nothing re-runs
-the experiment. The umbrella repo has an automated gate (harness/harness.cpp, `kMutants[]`), and
+the experiment. (The other 232 commits claim nothing of the kind, which is the
+same gap seen from the other side: most changes here were never checked this way
+at all.) The umbrella repo has an automated gate (harness/harness.cpp, `kMutants[]`), and
 the physical plan, logical plan and analyzer have grown theirs; this repo had
 none - the last of the five, and the one with the most tests (thirty-nine
 targets) and therefore the most room for a test that checks nothing.
@@ -35,7 +37,7 @@ aimed at precedence and the depth guard cannot kill the DDL suites, and
 pretending otherwise would mean
 either an allowlist nobody maintains or a gate somebody disables.
 """
-import argparse, pathlib, shutil, subprocess, sys
+import argparse, pathlib, re, shutil, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -199,7 +201,18 @@ def main():
     # but printed so the hole is visible and shrinking it is a visible improvement
     # rather than an invisible one.
     all_tests = sh(f"ctest --test-dir {bd} -N").stdout
-    known = {l.split(":", 1)[1].strip() for l in all_tests.splitlines() if "Test #" in l and ":" in l}
+    # ctest RIGHT-ALIGNS the number ("Test  #1:", two spaces, but "Test #10:"),
+    # so a literal "Test #" match silently drops tests 1-9. It did: this report
+    # claimed 30 of the suite's 39 binaries until the two numbers were compared.
+    # Hence the cross-check below - a count that does not agree with ctest's own
+    # total is a hard error, not a quietly smaller list.
+    known = {m.group(1).strip() for m in
+             (re.match(r"\s*Test\s+#\d+:\s*(.+)$", l) for l in all_tests.splitlines()) if m}
+    declared = re.search(r"Total Tests:\s*(\d+)", all_tests)
+    if declared and int(declared.group(1)) != len(known):
+        print(f"GATE FAIL: parsed {len(known)} test names but ctest declares "
+              f"{declared.group(1)} - the coverage report would understate its own scope.")
+        return 1
     never = sorted(known - set(killers))
     if never:
         print(f"\n[uncovered] {len(never)} binary/binaries this catalog cannot kill:")
