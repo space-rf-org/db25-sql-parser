@@ -117,6 +117,50 @@ TEST_F(PrecedenceRegressionTest, AndAboveOr) {
     EXPECT_EQ(left->primary_text, "AND");
 }
 
+// The OTHER operand order, which is the one that can actually fail.
+//
+// AndAboveOr above tests `a AND b OR c`. That ordering does NOT distinguish
+// correct precedence from no precedence at all: if AND and OR were given the
+// same level, left-associativity still folds `a AND b OR c` into
+// `(a AND b) OR c` - the identical tree - so the assertion holds either way. A
+// mutation setting AND's precedence equal to OR's passed this entire suite of
+// thirty-nine targets.
+//
+// `a OR b AND c` is the discriminating case. Correct precedence gives
+// `OR(a, AND(b, c))`; equal precedence folds left into `AND(OR(a, b), c)`, which
+// is a different predicate and a different answer.
+TEST_F(PrecedenceRegressionTest, AndAboveOrInTheDiscriminatingOrder) {
+    auto* ast = parse("SELECT * FROM t WHERE a OR b AND c");
+    ASSERT_NE(ast, nullptr);
+    auto* root = where_predicate(ast);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(root->primary_text, "OR") << "a OR b AND c must be rooted at OR";
+    auto* left = root->first_child;
+    ASSERT_NE(left, nullptr);
+    EXPECT_EQ(left->node_type, NodeType::ColumnRef) << "OR's left is the bare `a`";
+    auto* right = left->next_sibling;
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(right->node_type, NodeType::BinaryExpr);
+    EXPECT_EQ(right->primary_text, "AND") << "the AND must be nested UNDER the OR";
+}
+
+// Three levels, so a mutation that equalises AND and OR cannot pass by accident
+// of a two-operator shape: `a OR b AND c OR d` is `OR(OR(a, AND(b,c)), d)`.
+TEST_F(PrecedenceRegressionTest, AndAboveOrAcrossThreeOrTerms) {
+    auto* ast = parse("SELECT * FROM t WHERE a OR b AND c OR d");
+    ASSERT_NE(ast, nullptr);
+    auto* root = where_predicate(ast);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->primary_text, "OR");
+    auto* outer_left = root->first_child;
+    ASSERT_NE(outer_left, nullptr);
+    EXPECT_EQ(outer_left->primary_text, "OR") << "ORs fold left";
+    auto* inner_right = outer_left->first_child ? outer_left->first_child->next_sibling : nullptr;
+    ASSERT_NE(inner_right, nullptr);
+    EXPECT_EQ(inner_right->primary_text, "AND") << "the AND stays nested under the inner OR";
+}
+
 // Set operations fold LEFT: `A EXCEPT B EXCEPT C` -> `(A EXCEPT B) EXCEPT C`.
 // The outer node's left child must itself be an EXCEPT (left-deep), not the
 // right child (which would be right-associative and wrong for EXCEPT).
