@@ -120,6 +120,18 @@ target_include_directories(db25parser PUBLIC
 )
 # Tokenizer headers are already included via include_directories above
 
+# The SAME name the installed export publishes (install(EXPORT ... NAMESPACE
+# DB25::) below), so a consumer writes DB25::db25parser whether it reached this
+# target through find_package or through add_subdirectory. Without this alias the
+# two paths disagree on the target's name, and a consumer written against the
+# installed package cannot be built in-tree at all - which is exactly why the
+# semantic analyzer had to be special-cased by its parents instead of being
+# add_subdirectory'd like every other dependency in this chain.
+add_library(DB25::db25parser ALIAS db25parser)
+# No DB25::db25arena alias on purpose: install(TARGETS) exports db25parser ONLY,
+# so a DB25::db25arena would exist in-tree and not in the installed package - the
+# same asymmetry this alias exists to remove, reintroduced one target over.
+
 # Testing
 option(BUILD_TESTS "Build tests" ON)
 if(BUILD_TESTS)
