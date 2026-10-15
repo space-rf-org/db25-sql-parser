@@ -116,9 +116,31 @@ target_include_directories(db25arena PUBLIC
 add_library(db25parser STATIC ${PARSER_SOURCES})
 target_include_directories(db25parser PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    # The tokenizer's headers are part of this library's PUBLIC surface, not an
+    # internal detail: include/db25/parser/tokenizer_adapter.hpp does
+    # #include "simd_tokenizer.hpp". The include_directories() call above makes
+    # that resolve for THIS directory, but a directory property does not travel
+    # to a consumer in another directory - so an in-tree consumer failed to
+    # compile on exactly that header while the installed path worked, because
+    # install(DIRECTORY ${TOKENIZER_DIR}/include/) flattens these into the same
+    # prefix. Stating it as a usage requirement makes the two paths agree.
+    $<BUILD_INTERFACE:${TOKENIZER_DIR}/include>
+    # Still just `include` for the install: the flattening above means both
+    # header trees land in one directory in the install prefix.
     $<INSTALL_INTERFACE:include>
 )
-# Tokenizer headers are already included via include_directories above
+
+# The SAME name the installed export publishes (install(EXPORT ... NAMESPACE
+# DB25::) below), so a consumer writes DB25::db25parser whether it reached this
+# target through find_package or through add_subdirectory. Without this alias the
+# two paths disagree on the target's name, and a consumer written against the
+# installed package cannot be built in-tree at all - which is exactly why the
+# semantic analyzer had to be special-cased by its parents instead of being
+# add_subdirectory'd like every other dependency in this chain.
+add_library(DB25::db25parser ALIAS db25parser)
+# No DB25::db25arena alias on purpose: install(TARGETS) exports db25parser ONLY,
+# so a DB25::db25arena would exist in-tree and not in the installed package - the
+# same asymmetry this alias exists to remove, reintroduced one target over.
 
 # Testing
 option(BUILD_TESTS "Build tests" ON)
