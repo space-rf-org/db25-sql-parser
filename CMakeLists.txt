@@ -116,9 +116,19 @@ target_include_directories(db25arena PUBLIC
 add_library(db25parser STATIC ${PARSER_SOURCES})
 target_include_directories(db25parser PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    # The tokenizer's headers are part of this library's PUBLIC surface, not an
+    # internal detail: include/db25/parser/tokenizer_adapter.hpp does
+    # #include "simd_tokenizer.hpp". The include_directories() call above makes
+    # that resolve for THIS directory, but a directory property does not travel
+    # to a consumer in another directory - so an in-tree consumer failed to
+    # compile on exactly that header while the installed path worked, because
+    # install(DIRECTORY ${TOKENIZER_DIR}/include/) flattens these into the same
+    # prefix. Stating it as a usage requirement makes the two paths agree.
+    $<BUILD_INTERFACE:${TOKENIZER_DIR}/include>
+    # Still just `include` for the install: the flattening above means both
+    # header trees land in one directory in the install prefix.
     $<INSTALL_INTERFACE:include>
 )
-# Tokenizer headers are already included via include_directories above
 
 # The SAME name the installed export publishes (install(EXPORT ... NAMESPACE
 # DB25::) below), so a consumer writes DB25::db25parser whether it reached this
