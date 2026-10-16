@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include "db25/ast/ast_node.hpp"
 #include "db25/ast/node_types.hpp"
+#include <cstdint>
+#include <map>
+#include <string>
 
 using namespace db25::ast;
 
@@ -235,4 +238,102 @@ TEST(DataTypeTest, ToString) {
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
+}
+// ---------------------------------------------------------------------------
+// node_type_to_string: TOTAL and INJECTIVE over the whole enum.
+//
+// Found by the project's first line-coverage measurement: ast_node.cpp sat at
+// 26.6%, and almost every unexecuted line was an arm of this switch. The naive
+// reading is "write a test per arm", which would be filler - a name table is
+// not made trustworthy by calling it 183 times.
+//
+// The two properties below are what can actually be WRONG with a hand-written
+// mapping of this shape, and both are invisible to the parser tests that
+// incidentally hit a few arms:
+//
+//   TOTALITY   - a NodeType added to the enum but not to the switch falls
+//                through to the default and reports as something else. Every
+//                diagnostic and every s-expr dump naming that node is then
+//                silently wrong.
+//   INJECTIVITY - two arms returning the same string is the classic
+//                copy-paste slip in a 183-case switch, and it makes two
+//                distinct node kinds indistinguishable in every dump.
+TEST(ASTNodeTest, NodeTypeToStringIsTotal) {
+    for (std::uint16_t v = 0; v < static_cast<std::uint16_t>(NodeType::MaxNodeType); ++v) {
+        const auto t = static_cast<NodeType>(v);
+        const char* s = node_type_to_string(t);
+        ASSERT_NE(s, nullptr) << "NodeType " << v << " maps to nullptr";
+        EXPECT_NE(std::string{s}, "") << "NodeType " << v << " maps to the empty string";
+        if (t != NodeType::Unknown) {
+            EXPECT_NE(std::string{s}, "Unknown")
+                << "NodeType " << v << " is in the enum but not in the switch: it "
+                   "falls through to the Unknown arm";
+        }
+    }
+}
+
+TEST(ASTNodeTest, NodeTypeToStringIsInjective) {
+    std::map<std::string, int> seen;
+    for (std::uint16_t v = 0; v < static_cast<std::uint16_t>(NodeType::MaxNodeType); ++v) {
+        const std::string s = node_type_to_string(static_cast<NodeType>(v));
+        const auto [it, fresh] = seen.emplace(s, v);
+        EXPECT_TRUE(fresh) << "NodeType " << v << " and NodeType " << it->second
+                           << " both render as \"" << s << "\"";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// remove_child: the three positions, plus the count.
+//
+// Also surfaced by the coverage measurement - the whole middle-of-list branch
+// (the walk that finds the predecessor) was never executed by any of the
+// thirty-nine test binaries. It is real pointer surgery on a singly-linked
+// sibling chain, which is exactly the shape that goes wrong silently: an
+// unlinked node that is still reachable, or a chain truncated at the removal
+// point, both leave a tree that LOOKS fine until something walks it.
+TEST(ASTNodeTest, RemoveChildUnlinksAtEveryPosition) {
+    const auto names = [](const ASTNode& p) {
+        std::string out;
+        for (const ASTNode* c = p.first_child; c != nullptr; c = c->next_sibling)
+            out += std::to_string(static_cast<int>(c->node_type)) + ",";
+        return out;
+    };
+
+    {  // FIRST child: parent's head pointer must advance.
+        ASTNode p(NodeType::SelectList);
+        ASTNode a(NodeType::ColumnRef), b(NodeType::BinaryExpr), c(NodeType::IntegerLiteral);
+        p.add_child(&a); p.add_child(&b); p.add_child(&c);
+        p.remove_child(&a);
+        EXPECT_EQ(p.first_child, &b);
+        EXPECT_EQ(p.child_count.value, 2u);
+        EXPECT_EQ(a.parent, nullptr);
+        EXPECT_EQ(a.next_sibling, nullptr);       // fully unlinked, not just skipped
+    }
+    {  // MIDDLE child: the predecessor walk - the branch coverage showed unused.
+        ASTNode p(NodeType::SelectList);
+        ASTNode a(NodeType::ColumnRef), b(NodeType::BinaryExpr), c(NodeType::IntegerLiteral);
+        p.add_child(&a); p.add_child(&b); p.add_child(&c);
+        p.remove_child(&b);
+        EXPECT_EQ(p.first_child, &a);
+        EXPECT_EQ(a.next_sibling, &c) << "the predecessor must be stitched to b's successor";
+        EXPECT_EQ(p.child_count.value, 2u);
+        EXPECT_EQ(b.parent, nullptr);
+        EXPECT_EQ(b.next_sibling, nullptr);
+    }
+    {  // LAST child: the chain must TERMINATE, not dangle at the removed node.
+        ASTNode p(NodeType::SelectList);
+        ASTNode a(NodeType::ColumnRef), b(NodeType::BinaryExpr), c(NodeType::IntegerLiteral);
+        p.add_child(&a); p.add_child(&b); p.add_child(&c);
+        p.remove_child(&c);
+        EXPECT_EQ(b.next_sibling, nullptr) << "removing the tail must null the new tail's link";
+        EXPECT_EQ(p.child_count.value, 2u);
+    }
+    {  // ONLY child: the list goes empty.
+        ASTNode p(NodeType::SelectList);
+        ASTNode a(NodeType::ColumnRef);
+        p.add_child(&a);
+        p.remove_child(&a);
+        EXPECT_EQ(p.first_child, nullptr);
+        EXPECT_EQ(p.child_count.value, 0u);
+    }
 }
