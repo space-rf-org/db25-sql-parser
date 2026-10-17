@@ -74,6 +74,33 @@ MUTANTS = [
          file="include/db25/parser/parser.hpp",
          find="                parser_->depth_exceeded_ = true;",
          repl="                /* MUTANT M6 */;"),
+
+    # M7-M10 defend the third way a parser is quietly wrong, and the one that
+    # produced the worst failure found in this repo: it DROPS part of the input
+    # and still reports success. `SELECT * FROM data` parsed to
+    # `(SelectStmt (SelectList (Star)))` - no FROM clause, no error. M7 and M9
+    # restore exactly that, so a suite that checked only has_value() cannot
+    # kill them. M8 and M10 cover the other two name positions.
+    dict(id="M7", name="a keyword table name produces no TableRef (FROM clause silently dropped)",
+         file="src/parser/parser_select.cpp",
+         find="    else if (token_is_a_name(current_token_)) {\n        auto* table_node = arena_.allocate<ast::ASTNode>();",
+         repl="    else if (current_token_->type == tokenizer::TokenType::Identifier) {  // MUTANT M7\n        auto* table_node = arena_.allocate<ast::ASTNode>();"),
+    dict(id="M8", name="a keyword alias is silently dropped (FROM t data loses the alias)",
+         file="src/parser/parser_select.cpp",
+         find="    if (token_is_a_name(current_token_)) {\n        // Store alias in schema_name field (repurposed for alias)",
+         repl="    if (current_token_->type == tokenizer::TokenType::Identifier) {  // MUTANT M8\n        // Store alias in schema_name field (repurposed for alias)"),
+    dict(id="M9", name="EVERY keyword counts as a name (NATURAL becomes the left table's alias)",
+         file="src/parser/parser_select.cpp",
+         find="        case db25::Keyword::UNKNOWN:\n            return false;",
+         repl="        case db25::Keyword::UNKNOWN:\n            return true;  // MUTANT M9"),
+    dict(id="M10", name="a keyword CTE name is rejected (WITH data AS (...) fails to parse)",
+         file="src/parser/parser_select.cpp",
+         find="        if (!token_is_a_name(current_token_)) {",
+         repl="        if (current_token_->type != tokenizer::TokenType::Identifier) {  // MUTANT M10"),
+    dict(id="M11", name="a FROM with no table reference is accepted and the clause dropped",
+         file="src/parser/parser_select.cpp",
+         find='            error("expected a table reference after FROM");\n            return nullptr;',
+         repl="            /* MUTANT M11 */;"),
 ]
 
 

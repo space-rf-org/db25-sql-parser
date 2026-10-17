@@ -12,6 +12,102 @@
 
 namespace db25::parser {
 
+namespace {
+
+// Is this keyword usable as a bare NAME - a table name, a CTE name, or a table
+// alias?
+//
+// WHY THIS EXISTS. The tokenizer classifies all 208 of its keywords as
+// TokenType::Keyword (simd_tokenizer: `type = (kw != Keyword::UNKNOWN) ?
+// Keyword : Identifier`), so `data`, `type`, `level`, `key`, `chain`, `query`,
+// `range`, `start`, `value`-like words never reach the parser as identifiers.
+// Every site that accepted only TokenType::Identifier therefore rejected valid
+// SQL. At the CTE-name site that produced a clean parse error; at the
+// table-name and alias sites it was WORSE THAN AN ERROR - parse_table_reference
+// returned nullptr, parse_from_clause returned nullptr, and parse_select_stmt's
+// `at_clause_boundary` test let a non-clause keyword through unreported, so
+// `SELECT * FROM data` parsed successfully as `(SelectStmt (SelectList (Star)))`
+// with the FROM clause SILENTLY GONE. The analyzer then reported the downstream
+// symptom ("unresolved column 'id'") and the dropped table was never named.
+// `SELECT * FROM t data` dropped the alias the same way.
+//
+// WHY NOT the keyword table's is_reserved column. It is dead data - written by
+// the tokenizer's tools/extract_keywords.cpp and read by nothing - and it does
+// not encode what this position needs. AS, ON, USING, NATURAL, LATERAL, LIMIT,
+// OFFSET, FETCH, WINDOW, VALUES, INTO and FOR are all recorded as NON-reserved,
+// and every one of them can appear exactly where a table name or alias is being
+// looked for. Honouring that column would make `FROM a NATURAL JOIN b` parse
+// `NATURAL` as a's alias.
+//
+// WHAT IS ENCODED INSTEAD. The complement: the keywords that have a GRAMMATICAL
+// ROLE at or immediately after a table-reference position. Those must keep their
+// role; every other keyword is just a word, and a word in a name position is a
+// name. The set is small, local to this question, and each entry is justified by
+// a production rather than by a dialect's reserved-word list. Being wrong by
+// including too much costs a rejected exotic table name; being wrong by
+// including too little resurrects the silent drop - so the set errs long.
+[[nodiscard]] bool keyword_can_be_a_name(db25::Keyword kw) noexcept {
+    switch (kw) {
+        // Joins, and the clauses that terminate a join's right-hand side.
+        case db25::Keyword::JOIN:    case db25::Keyword::LEFT:
+        case db25::Keyword::RIGHT:   case db25::Keyword::INNER:
+        case db25::Keyword::FULL:    case db25::Keyword::OUTER:
+        case db25::Keyword::CROSS:   case db25::Keyword::NATURAL:
+        case db25::Keyword::ON:      case db25::Keyword::USING:
+        case db25::Keyword::LATERAL: case db25::Keyword::ONLY:
+        // The alias marker itself.
+        case db25::Keyword::AS:
+        // Clauses that may follow the FROM list.
+        case db25::Keyword::WHERE:   case db25::Keyword::GROUP:
+        case db25::Keyword::HAVING:  case db25::Keyword::ORDER:
+        case db25::Keyword::BY:      case db25::Keyword::LIMIT:
+        case db25::Keyword::OFFSET:  case db25::Keyword::FETCH:
+        case db25::Keyword::WINDOW:  case db25::Keyword::RETURNING:
+        case db25::Keyword::FOR:     case db25::Keyword::INTO:
+        case db25::Keyword::SET:
+        // Set operations.
+        case db25::Keyword::UNION:   case db25::Keyword::INTERSECT:
+        case db25::Keyword::EXCEPT:  case db25::Keyword::ALL:
+        case db25::Keyword::DISTINCT:
+        // A statement keyword here means the table reference is missing.
+        case db25::Keyword::SELECT:  case db25::Keyword::FROM:
+        case db25::Keyword::WITH:    case db25::Keyword::VALUES:
+        case db25::Keyword::INSERT:  case db25::Keyword::UPDATE:
+        case db25::Keyword::DELETE:  case db25::Keyword::CREATE:
+        case db25::Keyword::DROP:    case db25::Keyword::ALTER:
+        // DEFAULT is here because the suite put it here: the first version of
+        // this set omitted it and `INSERT INTO t DEFAULT VALUES` took DEFAULT
+        // as t's alias, breaking two tests. parse_table_reference also serves
+        // the DML target position, so the keywords that may follow an INSERT /
+        // UPDATE / DELETE target belong in the set alongside the SELECT ones.
+        case db25::Keyword::KW_DEFAULT:
+        // Expression keywords: these follow a table reference only when the
+        // query is already malformed.
+        case db25::Keyword::AND:     case db25::Keyword::OR:
+        case db25::Keyword::NOT:     case db25::Keyword::IN:
+        case db25::Keyword::IS:      case db25::Keyword::LIKE:
+        case db25::Keyword::BETWEEN: case db25::Keyword::KW_CASE:
+        case db25::Keyword::WHEN:    case db25::Keyword::THEN:
+        case db25::Keyword::ELSE:    case db25::Keyword::END:
+        case db25::Keyword::KW_NULL:
+        case db25::Keyword::UNKNOWN:
+            return false;
+        default:
+            return true;
+    }
+}
+
+// Does the current token start a bare name - an identifier, or a keyword that
+// carries no grammatical role in this position?
+[[nodiscard]] bool token_is_a_name(const tokenizer::Token* t) noexcept {
+    if (t == nullptr) return false;
+    if (t->type == tokenizer::TokenType::Identifier) return true;
+    return t->type == tokenizer::TokenType::Keyword &&
+           keyword_can_be_a_name(t->keyword_id);
+}
+
+}  // namespace
+
 // This file contains SELECT statement parsing and all its clauses
 // Functions are moved from parser.cpp to improve modularity
 ast::ASTNode* Parser::parse_with_statement() {
@@ -55,7 +151,9 @@ ast::ASTNode* Parser::parse_with_statement() {
 #endif
             return nullptr;
         }
-        if (current_token_->type != tokenizer::TokenType::Identifier) {
+        // A CTE name may be a non-reserved keyword: `WITH data AS (...)`,
+        // `WITH type AS (...)` are valid SQL and were rejected here.
+        if (!token_is_a_name(current_token_)) {
             std::string err_msg = "Expected CTE name (identifier) after WITH [RECURSIVE], but got ";
             err_msg += "token type " + std::to_string(static_cast<int>(current_token_->type));
             err_msg += " with value '" + std::string(current_token_->value) + "'";
@@ -361,34 +459,24 @@ ast::ASTNode* Parser::parse_select_stmt() {
 
         auto* from_clause = parse_from_clause();
         if (!from_clause) {
-            // FROM keyword present but no table reference followed. Reject only
-            // when the next token clearly cannot begin a table reference - EOF or
-            // a clause-boundary keyword (`SELECT a FROM ORDER BY 1`, `... FROM
-            // WHERE ...`, dangling `SELECT 1 FROM`). The keyword was consumed, so
-            // silently dropping it mis-structures the statement (WHERE/ORDER BY
-            // attaching to a from-less SELECT) and changes star-expansion.
-            // A non-clause keyword (`FROM table`) is left to the parser's
-            // existing keyword-as-table-name leniency, unchanged.
-            const bool at_clause_boundary =
-                current_token_ == nullptr ||
-                current_token_->type == tokenizer::TokenType::EndOfFile ||
-                (current_token_->type == tokenizer::TokenType::Keyword &&
-                 (current_token_->keyword_id == db25::Keyword::WHERE ||
-                  current_token_->keyword_id == db25::Keyword::GROUP ||
-                  current_token_->keyword_id == db25::Keyword::HAVING ||
-                  current_token_->keyword_id == db25::Keyword::ORDER ||
-                  current_token_->keyword_id == db25::Keyword::LIMIT ||
-                  current_token_->keyword_id == db25::Keyword::OFFSET ||
-                  current_token_->keyword_id == db25::Keyword::UNION ||
-                  current_token_->keyword_id == db25::Keyword::INTERSECT ||
-                  current_token_->keyword_id == db25::Keyword::EXCEPT ||
-                  current_token_->keyword_id == db25::Keyword::WINDOW ||
-                  current_token_->keyword_id == db25::Keyword::FETCH ||
-                  current_token_->keyword_id == db25::Keyword::RETURNING));
-            if (at_clause_boundary) {
-                error("expected a table reference after FROM");
-                return nullptr;
-            }
+            // FROM was consumed and no table reference materialised, so the
+            // statement is malformed - say so rather than dropping the clause.
+            //
+            // This used to reject only a hand-listed set of clause-boundary
+            // keywords (WHERE, GROUP, ORDER, LIMIT, ...) and let anything else
+            // through unreported, on the stated belief that a non-clause keyword
+            // was "left to the parser's existing keyword-as-table-name
+            // leniency". There was no such leniency: parse_table_reference
+            // tested for TokenType::Identifier, so `SELECT * FROM data` fell
+            // into this branch, produced no error, and returned a SelectStmt
+            // with no FROM clause at all. The leniency exists now
+            // (keyword_can_be_a_name), which is what makes the unconditional
+            // error safe: a word that can be a table name no longer reaches
+            // here. What reaches here - `FROM on`, `FROM as`, `FROM natural`,
+            // `FROM and`, EOF - is wrong in every case, and the hand-listed set
+            // missed all five.
+            error("expected a table reference after FROM");
+            return nullptr;
         } else {
             from_clause->parent = select_node;
             // Add as sibling to select_list
@@ -2040,7 +2128,7 @@ ast::ASTNode* Parser::parse_table_reference() {
         // table reference: an identifier (table name) or a nested '('.
         const bool is_join_group =
             !is_derived_table && peek_token_ &&
-            (peek_token_->type == tokenizer::TokenType::Identifier ||
+            (token_is_a_name(peek_token_) ||
              (peek_token_->type == tokenizer::TokenType::Delimiter &&
               peek_token_->value == "("));
 
@@ -2107,7 +2195,10 @@ ast::ASTNode* Parser::parse_table_reference() {
     // (or "catalog.schema.table"). Read every dotted part, not just the first,
     // otherwise the qualifier and everything after it (WHERE, etc.) is silently
     // dropped -- a data-loss bug for statements like DELETE.
-    else if (current_token_->type == tokenizer::TokenType::Identifier) {
+    // token_is_a_name, not Identifier: the tokenizer hands back every keyword
+    // as TokenType::Keyword, so `FROM data` reached here as a Keyword, produced
+    // no node, and had its whole FROM clause dropped without a diagnostic.
+    else if (token_is_a_name(current_token_)) {
         auto* table_node = arena_.allocate<ast::ASTNode>();
         new (table_node) ast::ASTNode(ast::NodeType::TableRef);
         table_node->node_id = next_node_id_++;
@@ -2162,19 +2253,14 @@ ast::ASTNode* Parser::parse_table_reference() {
         advance();
     }
 
-    // Check for alias identifier
-    if (current_token_ && current_token_->type == tokenizer::TokenType::Identifier &&
-        // Make sure it's not a keyword that could follow
-        current_token_->value != "WHERE" && current_token_->value != "where" &&
-        current_token_->value != "JOIN" && current_token_->value != "join" &&
-        current_token_->value != "LEFT" && current_token_->value != "left" &&
-        current_token_->value != "RIGHT" && current_token_->value != "right" &&
-        current_token_->value != "INNER" && current_token_->value != "inner" &&
-        current_token_->value != "FULL" && current_token_->value != "full" &&
-        current_token_->value != "CROSS" && current_token_->value != "cross" &&
-        current_token_->value != "ON" && current_token_->value != "on" &&
-        current_token_->value != "GROUP" && current_token_->value != "group" &&
-        current_token_->value != "ORDER" && current_token_->value != "order") {
+    // Check for the alias name. This was a list of case-doubled string compares
+    // against ten keywords that could follow a table reference - an exclusion
+    // set maintained by hand, spelled in two cases, and applied to a token the
+    // Identifier test had already excluded every keyword from, so none of the
+    // twenty comparisons could ever fire. keyword_can_be_a_name states the same
+    // intent once, over the whole keyword set, and is now load-bearing: it is
+    // what stops `FROM a NATURAL JOIN b` taking NATURAL as a's alias.
+    if (token_is_a_name(current_token_)) {
         // Store alias in schema_name field (repurposed for alias)
         ref_node->schema_name = copy_to_arena(current_token_->value);
         ref_node->semantic_flags |= static_cast<uint16_t>(ast::NodeFlags::HasAlias);
