@@ -271,6 +271,10 @@ if(BUILD_TESTS)
     # Negative-path tests - malformed SQL returns an error Result without crashing
     add_parser_test(test_parser_negative tests/test_parser_negative.cpp)
 
+    # Non-reserved keywords in name positions (table / CTE / alias), asserted on
+    # AST shape because the old failure mode was a silent drop, not a parse error.
+    add_parser_test(test_keyword_identifiers tests/test_keyword_identifiers.cpp)
+
     # SQL-standard keyword-argument string functions: POSITION(x IN y),
     # SUBSTRING(s FROM a FOR b), TRIM([spec] [chars] FROM s).
     add_parser_test(test_string_keyword_functions tests/test_string_keyword_functions.cpp)

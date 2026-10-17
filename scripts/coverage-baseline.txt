@@ -1,11 +1,19 @@
 86.2
 # Total line coverage of the SQL parser and tokenizer, as measured by scripts/coverage.sh over
-# THIS repository's own ctest targets (5929 lines).
+# THIS repository's own ctest targets (about 5900 lines; the exact count is compiler-dependent).
 #
 # SCOPE MATTERS. The same files measured against the umbrella's suite read very
 # differently, because that suite exercises the query path and builds this repo
 # for its own purposes. A number without its scope is not a weak number, it is
 # a wrong one.
+#
+# WHY THE FLOOR SITS BELOW THE LAST MEASUREMENT. After the keyword-identifier
+# fix this reads 86.3% of 5913 lines under g++-13, the compiler available where
+# it was run. CI measures with g++-14, which counts a slightly different set of
+# lines - that discrepancy has already turned one job red over a single tenth of
+# a percent. So the floor stays at 86.2: it is a floor, and a floor set exactly
+# at one compiler's reading is a floor that flaps. Raise it when a change moves
+# the number by more than that noise.
 #
 # A RECORD, not a target. Move it in the same commit that changes coverage, and
 # say why. A baseline edited afterwards to turn a red job green is a baseline
